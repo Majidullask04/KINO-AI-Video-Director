@@ -67,7 +67,7 @@ import {
   Sparkles,
 } from "lucide-react";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://kino-ai-video-director.onrender.com";
 
 export default function Home() {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>("studio");
