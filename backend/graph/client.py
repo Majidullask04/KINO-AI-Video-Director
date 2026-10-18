@@ -30,10 +30,14 @@ class VideoGraphDB:
         self.port = int(port_raw) if port_raw.isdigit() else 6379
         
         raw_password = os.getenv("FALKORDB_PASSWORD")
-        self.password = raw_password.strip() if raw_password and raw_password.strip() not in ("", "None", "null") else None
+        if raw_password:
+            raw_password = raw_password.strip().strip("'").strip('"')
+        self.password = raw_password if raw_password not in ("", "None", "null") else None
         
         raw_username = os.getenv("FALKORDB_USERNAME")
-        self.username = raw_username.strip() if raw_username and raw_username.strip() not in ("", "None", "null") else None
+        if raw_username:
+            raw_username = raw_username.strip().strip("'").strip('"')
+        self.username = raw_username if raw_username not in ("", "None", "null") else None
         
         self.graph_name = (os.getenv("FALKORDB_GRAPH_NAME") or "ai_video_director").strip()
         
@@ -64,9 +68,20 @@ class VideoGraphDB:
                     kwargs["password"] = self.password
                 if self.username:
                     kwargs["username"] = self.username
+                elif self.password:
+                    # FalkorDB Cloud on AWS uses Redis ACL with 'default' user
+                    kwargs["username"] = "default"
                 if self.ssl:
                     kwargs["ssl"] = True
-                self._client = FalkorDB(**kwargs)
+                try:
+                    self._client = FalkorDB(**kwargs)
+                except Exception as e:
+                    # If 'default' failed or wasn't accepted, try without explicit username
+                    if kwargs.get("username") == "default":
+                        kwargs.pop("username", None)
+                        self._client = FalkorDB(**kwargs)
+                    else:
+                        raise e
         return self._client
 
     @property
