@@ -1,5 +1,6 @@
 import os
 import time
+from urllib.parse import urlparse, urlunparse
 import logging
 from typing import Any, Dict, List, Optional
 from falkordb import FalkorDB
@@ -57,9 +58,26 @@ class VideoGraphDB:
 
     def get_client(self) -> FalkorDB:
         if self._client is None:
+            # 1. Try URL if provided
             if self.url:
-                self._client = FalkorDB.from_url(self.url)
-            else:
+                try:
+                    parsed = urlparse(self.url)
+                    # If URL does not have a password but FALKORDB_PASSWORD was set, inject password
+                    if not parsed.password and self.password:
+                        user = parsed.username or self.username or "falkordb"
+                        netloc = f"{user}:{self.password}@{parsed.hostname}"
+                        if parsed.port:
+                            netloc += f":{parsed.port}"
+                        repaired_url = urlunparse((parsed.scheme or "falkor", netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+                        self._client = FalkorDB.from_url(repaired_url)
+                    else:
+                        self._client = FalkorDB.from_url(self.url)
+                except Exception as url_err:
+                    logger.warning(f"Could not connect using FALKORDB_URL ({url_err}), falling back to direct host/port...")
+                    self._client = None
+
+            # 2. If no URL or URL failed, connect directly via host/port/password
+            if self._client is None:
                 base_kwargs = {
                     "host": self.host,
                     "port": self.port,
