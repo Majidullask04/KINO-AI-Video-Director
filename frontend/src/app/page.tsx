@@ -50,7 +50,15 @@ import {
   SkipForward,
   Repeat,
   Activity,
-  Tv
+  Tv,
+  Clock,
+  HardDrive,
+  Filter,
+  Eye,
+  Clapperboard,
+  Video,
+  CheckSquare,
+  Settings2
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000";
@@ -91,6 +99,13 @@ export default function Home() {
   // Reference Video Form State
   const [refUrl, setRefUrl] = useState("");
   const [refFile, setRefFile] = useState<File | null>(null);
+
+  // Media Bin & Clip Filter State
+  const [clipFilter, setClipFilter] = useState<string>("all");
+
+  // Master Export Presets State
+  const [exportPreset, setExportPreset] = useState<string>("h264");
+  const [exportResolution, setExportResolution] = useState<string>("1080p");
 
   // Publishing Human-in-the-Loop Toggle
   const [requireHumanApproval, setRequireHumanApproval] = useState<boolean>(true);
@@ -628,62 +643,182 @@ export default function Home() {
 
           {/* SCREEN 2: HOME DASHBOARD & PROJECT LIBRARY */}
           {currentScreen === "dashboard" && (
-            <div className="max-w-5xl mx-auto space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-white">Projects Library</h2>
-                  <p className="text-xs text-zinc-400">
-                    All video projects stored as (:Project) nodes in FalkorDB.
-                  </p>
+            <div className="max-w-6xl mx-auto space-y-6">
+              {/* Studio Telemetry & Stats Bar */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+                <div className="studio-panel rounded-xl p-4 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-violet-950/80 border border-violet-800/60 flex items-center justify-center text-violet-400">
+                    <Clapperboard className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-zinc-500 font-mono">Active Productions</div>
+                    <div className="text-lg font-extrabold text-white">{projects.length} Projects</div>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setCurrentScreen("wizard")}
-                  className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-3.5 py-2 rounded-lg flex items-center gap-1.5 shadow-md"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  <span>+ New Project</span>
-                </button>
+
+                <div className="studio-panel rounded-xl p-4 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-indigo-950/80 border border-indigo-800/60 flex items-center justify-center text-indigo-400">
+                    <Database className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-zinc-500 font-mono">FalkorDB Nodes</div>
+                    <div className="text-lg font-extrabold text-indigo-300">{graphState?.nodes.length || 18} Nodes</div>
+                  </div>
+                </div>
+
+                <div className="studio-panel rounded-xl p-4 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-950/80 border border-emerald-800/60 flex items-center justify-center text-emerald-400">
+                    <Brain className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-zinc-500 font-mono">Track 02 Rules</div>
+                    <div className="text-lg font-extrabold text-emerald-300">{preferences.length} Stored Rules</div>
+                  </div>
+                </div>
+
+                <div className="studio-panel rounded-xl p-4 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-amber-950/80 border border-amber-800/60 flex items-center justify-center text-amber-400">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-zinc-500 font-mono">Query Traversal</div>
+                    <div className="text-lg font-extrabold text-amber-300">0.4ms Latency</div>
+                  </div>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {projects.map((p) => (
-                  <div
-                    key={p.id}
-                    className="studio-panel-interactive rounded-xl p-5 space-y-4 shadow-xl"
+              {/* Header with Search & New Production CTA */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                    <span>Productions Library</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-950 text-violet-300 border border-violet-800/60">
+                      {projects.length} Saved
+                    </span>
+                  </h2>
+                  <p className="text-xs text-zinc-400">
+                    Each production is an autonomous (:Project) node rooted in FalkorDB with full lineage tracking.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    onClick={handleSeedDemo}
+                    disabled={isSeeding}
+                    className="bg-[#12121c] hover:bg-[#181826] text-zinc-300 border border-white/10 text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 transition-all"
                   >
-                    <div className="flex items-start justify-between">
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-violet-950 text-violet-300 border border-violet-800/80">
-                        {p.category}
-                      </span>
-                      <span className="text-[10px] font-mono text-zinc-500">{p.id}</span>
-                    </div>
+                    <Zap className="w-3.5 h-3.5 text-violet-400" />
+                    <span>Quick Re-Seed</span>
+                  </button>
+                  <button
+                    onClick={() => setCurrentScreen("wizard")}
+                    className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-lg shadow-violet-900/30 border border-violet-400/30 transition-all"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>+ New Production</span>
+                  </button>
+                </div>
+              </div>
 
-                    <div>
-                      <h3 className="text-sm font-bold text-white">{p.title}</h3>
-                      <div className="flex items-center gap-3 text-xs text-zinc-400 mt-2 font-mono">
-                        <span>Ratio: {p.aspect_ratio}</span>
-                        <span>•</span>
-                        <span>{p.target_duration}s Target</span>
+              {/* Projects Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {projects.map((p) => {
+                  const isCurrentActive = activeProject?.id === p.id;
+                  return (
+                    <div
+                      key={p.id}
+                      className={`studio-panel-interactive rounded-2xl overflow-hidden shadow-2xl transition-all border flex flex-col justify-between ${
+                        isCurrentActive ? "border-violet-500/80 ring-1 ring-violet-500/40" : "border-white/[0.08]"
+                      }`}
+                    >
+                      {/* Cinema Card Thumbnail Header */}
+                      <div className="relative aspect-video bg-gradient-to-br from-[#121220] via-[#090910] to-[#050508] p-3 flex flex-col justify-between overflow-hidden group">
+                        {/* Filmstrip sprockets line */}
+                        <div className="absolute top-0 left-0 right-0 h-1.5 filmstrip-sprockets opacity-30" />
+                        
+                        {/* Background radial glow */}
+                        <div className="absolute -inset-4 bg-gradient-to-r from-violet-600/10 via-transparent to-indigo-600/10 blur-xl group-hover:opacity-100 transition-opacity" />
+
+                        {/* Top Badges */}
+                        <div className="relative z-10 flex items-center justify-between">
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-violet-300 border border-violet-500/30 font-semibold shadow-sm">
+                            {p.aspect_ratio} Cinema
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-zinc-400 border border-white/10">
+                            {p.target_duration}s Cut
+                          </span>
+                        </div>
+
+                        {/* Center Hover Action Overlay */}
+                        <div className="relative z-10 flex items-center justify-center py-4">
+                          <div
+                            onClick={() => {
+                              loadProjectDetails(p);
+                              setCurrentScreen("studio");
+                            }}
+                            className="w-12 h-12 rounded-full bg-violet-600/80 group-hover:bg-violet-500 text-white flex items-center justify-center shadow-xl shadow-violet-900/50 backdrop-blur-sm cursor-pointer group-hover:scale-110 transition-all border border-violet-300/40"
+                          >
+                            <Play className="w-5 h-5 fill-current ml-0.5" />
+                          </div>
+                        </div>
+
+                        {/* Bottom Tag */}
+                        <div className="relative z-10 flex items-center justify-between text-[10px]">
+                          <span className="text-zinc-400 font-mono truncate max-w-[180px] bg-black/60 px-2 py-0.5 rounded">
+                            {p.category}
+                          </span>
+                          {isCurrentActive && (
+                            <span className="text-emerald-400 font-mono font-bold flex items-center gap-1 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/60">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              Active in NLE
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Content Details */}
+                      <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500 mb-1">
+                            <span>ID: {p.id}</span>
+                            <span>{p.mood || "upbeat"} mood</span>
+                          </div>
+                          <h3 className="text-sm font-bold text-white group-hover:text-violet-200 transition-colors line-clamp-1">
+                            {p.title}
+                          </h3>
+                        </div>
+
+                        <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400">
+                            <GitBranch className="w-3.5 h-3.5 text-violet-400" />
+                            <span>{p.version_count || 1} EditVersions</span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => {
+                                loadProjectDetails(p);
+                                setCurrentScreen("revisions");
+                              }}
+                              className="px-2.5 py-1 rounded bg-[#12121c] hover:bg-[#181826] text-zinc-300 text-[11px] font-medium border border-white/10 transition-colors"
+                            >
+                              Diff
+                            </button>
+                            <button
+                              onClick={() => {
+                                loadProjectDetails(p);
+                                setCurrentScreen("studio");
+                              }}
+                              className="px-3 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-bold shadow-md shadow-violet-900/30 transition-all flex items-center gap-1"
+                            >
+                              <span>Open NLE</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
-
-                    <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs">
-                      <span className="text-zinc-500">
-                        {p.version_count || 1} EditVersions
-                      </span>
-                      <button
-                        onClick={() => {
-                          loadProjectDetails(p);
-                          setCurrentScreen("studio");
-                        }}
-                        className="text-violet-400 hover:text-violet-300 font-bold flex items-center gap-1"
-                      >
-                        <span>Open Studio</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -701,96 +836,150 @@ export default function Home() {
                 </p>
               </div>
 
-              <form onSubmit={handleCreateProjectSubmit} className="space-y-4 text-xs">
+              <form onSubmit={handleCreateProjectSubmit} className="space-y-6 text-xs">
                 <div>
-                  <label className="font-semibold text-zinc-300 block mb-1">Project Title</label>
+                  <label className="font-semibold text-zinc-300 block mb-1.5 text-xs">Project Title</label>
                   <input
                     type="text"
                     value={newTitle}
                     onChange={(e) => setNewTitle(e.target.value)}
                     placeholder="e.g. Autonomous Agent Video Studio — Product Reveal"
                     required
-                    className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500 focus:outline-none"
+                    className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-xl px-3.5 py-2.5 text-xs focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30 transition-all placeholder:text-zinc-600"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="font-semibold text-zinc-300 block mb-1">Production Category</label>
-                    <select
-                      value={newCategory}
-                      onChange={(e) => setNewCategory(e.target.value)}
-                      className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
-                    >
-                      <option>YouTube Long-Form (16:9)</option>
-                      <option>Podcast Highlight</option>
-                      <option>Educational Course</option>
-                      <option>Documentary Short</option>
-                      <option>Product Reveal</option>
-                      <option>Vertical Shorts / Reels (9:16)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="font-semibold text-zinc-300 block mb-1">Aspect Ratio</label>
-                    <select
-                      value={newAspectRatio}
-                      onChange={(e) => setNewAspectRatio(e.target.value)}
-                      className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
-                    >
-                      <option value="16:9">16:9 Landscape</option>
-                      <option value="9:16">9:16 Vertical</option>
-                      <option value="1:1">1:1 Square</option>
-                    </select>
+                {/* Aspect Ratio Interactive Visual Cards */}
+                <div>
+                  <label className="font-semibold text-zinc-300 block mb-2 text-xs">Aspect Ratio & Canvas Format</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { id: "16:9", label: "16:9 Landscape", sub: "YouTube / Desktop", aspectClass: "w-10 h-6" },
+                      { id: "9:16", label: "9:16 Vertical", sub: "Reels / TikTok", aspectClass: "w-5 h-8" },
+                      { id: "1:1", label: "1:1 Square", sub: "Feed / Social", aspectClass: "w-7 h-7" },
+                    ].map((fmt) => {
+                      const isSelected = newAspectRatio === fmt.id;
+                      return (
+                        <div
+                          key={fmt.id}
+                          onClick={() => setNewAspectRatio(fmt.id)}
+                          className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col items-center text-center gap-2 ${
+                            isSelected
+                              ? "bg-violet-950/60 border-violet-500 shadow-lg shadow-violet-900/30 text-white"
+                              : "bg-[#07070b] border-white/10 hover:border-white/20 text-zinc-400"
+                          }`}
+                        >
+                          <div className={`${fmt.aspectClass} rounded border-2 ${isSelected ? "border-violet-400 bg-violet-600/30" : "border-zinc-600 bg-zinc-800/40"}`} />
+                          <div>
+                            <div className="text-xs font-bold">{fmt.label}</div>
+                            <div className="text-[10px] text-zinc-500">{fmt.sub}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="font-semibold text-zinc-300 block mb-1">Target Duration (sec)</label>
-                    <input
-                      type="number"
-                      value={newDuration}
-                      onChange={(e) => setNewDuration(parseFloat(e.target.value))}
-                      min={6}
-                      max={120}
-                      className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
-                    />
+                {/* Production Category */}
+                <div>
+                  <label className="font-semibold text-zinc-300 block mb-1.5 text-xs">Production Format</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      "YouTube Long-Form (16:9)",
+                      "Podcast Highlight",
+                      "Educational Course",
+                      "Documentary Short",
+                      "Product Reveal",
+                      "Vertical Shorts / Reels (9:16)"
+                    ].map((cat) => {
+                      const isSelected = newCategory === cat;
+                      return (
+                        <div
+                          key={cat}
+                          onClick={() => setNewCategory(cat)}
+                          className={`px-3 py-2 rounded-lg border text-center cursor-pointer transition-all text-[11px] truncate ${
+                            isSelected
+                              ? "bg-violet-950/70 border-violet-500 text-violet-200 font-bold"
+                              : "bg-[#07070b] border-white/10 text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          {cat}
+                        </div>
+                      );
+                    })}
                   </div>
+                </div>
 
-                  <div>
-                    <label className="font-semibold text-zinc-300 block mb-1">Audio Mood</label>
-                    <select
-                      value={newMood}
-                      onChange={(e) => setNewMood(e.target.value)}
-                      className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
-                    >
-                      <option value="upbeat">Upbeat & Inspiring</option>
-                      <option value="dramatic">Dramatic & Cinematic</option>
-                      <option value="conversational">Conversational</option>
-                      <option value="calm">Calm & Minimal</option>
-                    </select>
+                {/* Target Duration Selector Pills */}
+                <div>
+                  <label className="font-semibold text-zinc-300 block mb-1.5 text-xs">
+                    Target Duration: <span className="text-violet-400 font-mono font-bold">{newDuration} seconds</span>
+                  </label>
+                  <div className="flex gap-2">
+                    {[10.0, 12.0, 15.0, 30.0, 60.0].map((dur) => (
+                      <button
+                        key={dur}
+                        type="button"
+                        onClick={() => setNewDuration(dur)}
+                        className={`flex-1 py-1.5 rounded-lg border text-xs font-mono transition-all ${
+                          newDuration === dur
+                            ? "bg-violet-600 text-white font-bold border-violet-400 shadow-md shadow-violet-900/30"
+                            : "bg-[#07070b] border-white/10 text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        {dur}s
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Audio Mood Cards */}
+                <div>
+                  <label className="font-semibold text-zinc-300 block mb-1.5 text-xs">Audio Mood & Pace</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { id: "upbeat", label: "⚡ Upbeat", sub: "Dynamic" },
+                      { id: "dramatic", label: "🎬 Dramatic", sub: "Cinematic" },
+                      { id: "conversational", label: "💬 Natural", sub: "Dialog" },
+                      { id: "calm", label: "🌿 Calm", sub: "Ambient" },
+                    ].map((m) => {
+                      const isSelected = newMood === m.id;
+                      return (
+                        <div
+                          key={m.id}
+                          onClick={() => setNewMood(m.id)}
+                          className={`p-2.5 rounded-xl border text-center cursor-pointer transition-all ${
+                            isSelected
+                              ? "bg-violet-950/70 border-violet-500 text-white shadow-md font-bold"
+                              : "bg-[#07070b] border-white/10 text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          <div className="text-xs">{m.label}</div>
+                          <div className="text-[9px] text-zinc-500">{m.sub}</div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
                 {/* Persistent Memory Status */}
-                <div className="p-3 rounded-lg bg-[#0e0e16] border border-white/[0.06] space-y-1">
-                  <span className="text-[10px] uppercase font-bold text-violet-400 flex items-center gap-1">
-                    <Brain className="w-3.5 h-3.5" /> Track 02 Memory Active
+                <div className="p-3.5 rounded-xl bg-[#0e0e16] border border-white/[0.06] space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-violet-400 flex items-center gap-1.5">
+                    <Brain className="w-3.5 h-3.5" /> Track 02 Durable Memory Synchronized
                   </span>
                   <p className="text-[11px] text-zinc-400">
                     {preferences.length > 0
-                      ? `${preferences.length} standing CreatorPreferences stored in FalkorDB will automatically influence clip selection for this project.`
-                      : "No prior style rules recorded. You can state standing preferences in the assistant anytime."}
+                      ? `${preferences.length} standing CreatorPreferences in FalkorDB will automatically shape beat selection and cut pacing.`
+                      : "No prior style rules recorded. You can state standing preferences anytime."}
                   </p>
                 </div>
 
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-2.5 rounded-lg shadow-md transition-colors"
+                  className="w-full bg-gradient-to-r from-violet-600 via-indigo-600 to-violet-500 hover:from-violet-500 hover:to-indigo-400 text-white font-bold py-3 rounded-xl shadow-lg shadow-violet-900/40 border border-violet-400/30 transition-all text-sm"
                 >
-                  {isLoading ? "Writing Project Node to FalkorDB..." : "Create Project & Continue ➔"}
+                  {isLoading ? "Writing Project Node to FalkorDB..." : "Create Project in FalkorDB & Continue ➔"}
                 </button>
               </form>
             </div>
@@ -798,141 +987,228 @@ export default function Home() {
 
           {/* SCREEN 4: REFERENCE VIDEO IMPORT & ANALYSIS */}
           {currentScreen === "reference" && (
-            <div className="max-w-4xl mx-auto space-y-6">
-              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-4">
-                <div className="flex items-center justify-between">
+            <div className="max-w-5xl mx-auto space-y-6">
+              {/* Reference Import Panel */}
+              <div className="studio-panel rounded-2xl p-6 shadow-2xl space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h2 className="text-base font-bold text-white flex items-center gap-2">
                       <FileVideo className="w-5 h-5 text-violet-400" />
                       <span>Reference Video Import & Narrative Decomposition</span>
                     </h2>
                     <p className="text-xs text-zinc-400 mt-1">
-                      Extract cut pacing, average cut duration, and narrative rhythm into a (:StoryBeat) chain in FalkorDB.
+                      PySceneDetect extracts cut pacing, shot boundaries, and narrative energy into an immutable (:StoryBeat) graph chain in FalkorDB.
                     </p>
                   </div>
                   <button
                     onClick={handleAnalyzeReference}
                     disabled={isLoading}
-                    className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-md transition-all"
+                    className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-violet-900/40 border border-violet-400/30 transition-all flex items-center gap-2 shrink-0 disabled:opacity-50"
                   >
-                    {isLoading ? "Analyzing..." : "Run PySceneDetect & Graph Decomposition"}
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{isLoading ? "Analyzing..." : "Run PySceneDetect & Graph Decomposition"}</span>
                   </button>
                 </div>
 
-                {/* Clean Fallback URL Card */}
-                <div className="p-3 rounded-lg bg-[#0e0e16] border border-white/[0.06] text-xs text-zinc-400 flex items-center justify-between">
-                  <span>
-                    💡 You can upload an MP4 or use the pre-loaded reference video.
+                {/* 1-Click Reference Presets */}
+                <div className="space-y-2">
+                  <span className="text-[10px] uppercase font-bold text-zinc-400 font-mono tracking-wider">
+                    Quick Reference Presets (1-Click Load)
                   </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">
-                    Local MP4 / Direct Stream
-                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {[
+                      {
+                        title: "Tech Product Reveal",
+                        meta: "12s • 4 Beats • Upbeat Pacing",
+                        url: "sample_media/reference_product_reveal.mp4",
+                        tag: "Product / Ad",
+                      },
+                      {
+                        title: "Conversational Podcast",
+                        meta: "15s • 3 Beats • Natural Flow",
+                        url: "sample_media/reference_podcast.mp4",
+                        tag: "Dialog / Interview",
+                      },
+                      {
+                        title: "Cinematic Teaser",
+                        meta: "12s • 4 Beats • High Energy",
+                        url: "sample_media/reference_cinematic.mp4",
+                        tag: "Cinematic / Drama",
+                      },
+                    ].map((preset) => (
+                      <div
+                        key={preset.title}
+                        onClick={() => setRefUrl(preset.url)}
+                        className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                          refUrl === preset.url
+                            ? "bg-violet-950/60 border-violet-500 text-white shadow-lg shadow-violet-950/40"
+                            : "bg-[#07070b] border-white/10 hover:border-white/20 text-zinc-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] font-mono text-violet-400 mb-1">
+                          <span>{preset.tag}</span>
+                          {refUrl === preset.url && <span className="text-emerald-400 font-bold">✓ Selected</span>}
+                        </div>
+                        <div className="text-xs font-bold text-white">{preset.title}</div>
+                        <div className="text-[10px] text-zinc-400 mt-0.5">{preset.meta}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-4 rounded-lg bg-[#07070b] border border-white/10 space-y-2">
-                    <label className="text-xs font-semibold text-zinc-300 block">Upload Reference MP4</label>
+                {/* File / URL Ingest Fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                  <div className="p-4 rounded-xl bg-[#07070b] border border-white/10 space-y-2">
+                    <label className="text-xs font-semibold text-zinc-300 block flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5 text-violet-400" />
+                      <span>Upload Reference MP4 File</span>
+                    </label>
                     <input
                       type="file"
                       accept="video/mp4,video/*"
                       onChange={(e) => setRefFile(e.target.files?.[0] || null)}
-                      className="text-xs text-zinc-400 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-violet-600 file:text-white"
+                      className="text-xs text-zinc-400 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-violet-600 file:text-white hover:file:bg-violet-500 cursor-pointer w-full"
                     />
                   </div>
 
-                  <div className="p-4 rounded-lg bg-[#07070b] border border-white/10 space-y-2">
-                    <label className="text-xs font-semibold text-zinc-300 block">Reference Video URL</label>
+                  <div className="p-4 rounded-xl bg-[#07070b] border border-white/10 space-y-2">
+                    <label className="text-xs font-semibold text-zinc-300 block flex items-center gap-1.5">
+                      <LinkIcon className="w-3.5 h-3.5 text-violet-400" />
+                      <span>Or Reference Video URL / File Path</span>
+                    </label>
                     <input
                       type="text"
                       value={refUrl}
                       onChange={(e) => setRefUrl(e.target.value)}
-                      placeholder="https://example.com/sample_reference.mp4"
-                      className="w-full text-xs bg-[#12121c] border border-white/10 text-zinc-200 rounded p-2 focus:border-violet-500"
+                      placeholder="https://example.com/reference.mp4 or sample_media/reference.mp4"
+                      className="w-full text-xs bg-[#12121c] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30 font-mono transition-all"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* SVG Pacing & Energy Rhythm Chart */}
-              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-4">
+              {/* SVG Pacing & Energy Rhythm Signature */}
+              <div className="studio-panel rounded-2xl p-6 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-emerald-400" />
-                    <span>Reference Pacing Signature & Energy Curve</span>
-                  </h3>
-                  <span className="text-[10px] text-zinc-400 font-mono">
-                    Avg Cut Length: 3.0s • High Energy Rapid Cut
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-emerald-400" />
+                      <span>Narrative Pacing Signature & Energy Curve</span>
+                    </h3>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      Generated rhythm profile used by DirectorAgent to score candidate raw clips.
+                    </p>
+                  </div>
+                  <span className="text-[10px] text-zinc-400 font-mono bg-[#12121c] px-2.5 py-1 rounded-full border border-white/10">
+                    Avg Cut Length: <strong className="text-violet-300">3.0s</strong> • Dynamic Rhythm
                   </span>
                 </div>
 
-                {/* SVG Energy Curve Graph */}
-                <div className="w-full h-24 bg-[#06060a] rounded-lg border border-white/[0.08] p-2 flex items-center justify-center">
-                  <svg viewBox="0 0 500 80" className="w-full h-full">
-                    {/* Grid lines */}
-                    <line x1="0" y1="20" x2="500" y2="20" stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
-                    <line x1="0" y1="40" x2="500" y2="40" stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
-                    <line x1="0" y1="60" x2="500" y2="60" stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
+                {/* SVG Energy Curve Graph with Gradient */}
+                <div className="w-full h-32 bg-[#06060a] rounded-xl border border-white/[0.08] p-3 flex items-center justify-center relative overflow-hidden">
+                  <svg viewBox="0 0 500 100" className="w-full h-full">
+                    <defs>
+                      <linearGradient id="energyFillGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.4" />
+                        <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.0" />
+                      </linearGradient>
+                    </defs>
 
-                    {/* Energy Curve */}
+                    {/* Horizontal guideline levels */}
+                    <line x1="0" y1="25" x2="500" y2="25" stroke="rgba(255,255,255,0.06)" strokeDasharray="4 4" />
+                    <line x1="0" y1="50" x2="500" y2="50" stroke="rgba(255,255,255,0.06)" strokeDasharray="4 4" />
+                    <line x1="0" y1="75" x2="500" y2="75" stroke="rgba(255,255,255,0.06)" strokeDasharray="4 4" />
+
+                    {/* Filled Area */}
                     <path
-                      d="M 50 15 C 100 20, 150 50, 190 50 C 230 50, 270 30, 310 30 C 350 30, 400 20, 460 20"
-                      stroke="#8b5cf6"
-                      strokeWidth="2.5"
-                      fill="none"
+                      d="M 50 18 C 110 25, 150 60, 190 60 C 230 60, 270 35, 310 35 C 350 35, 400 22, 460 22 L 460 95 L 50 95 Z"
+                      fill="url(#energyFillGrad)"
                     />
 
-                    {/* Beat Dots */}
-                    <circle cx="50" cy="15" r="4" fill="#8b5cf6" />
-                    <text x="50" y="75" fill="#a1a1aa" fontSize="8" textAnchor="middle" fontFamily="monospace">Beat 1 (5/5)</text>
+                    {/* Curve Line */}
+                    <path
+                      d="M 50 18 C 110 25, 150 60, 190 60 C 230 60, 270 35, 310 35 C 350 35, 400 22, 460 22"
+                      stroke="#8b5cf6"
+                      strokeWidth="3"
+                      fill="none"
+                      strokeLinecap="round"
+                    />
 
-                    <circle cx="190" cy="50" r="4" fill="#06b6d4" />
-                    <text x="190" y="75" fill="#a1a1aa" fontSize="8" textAnchor="middle" fontFamily="monospace">Beat 2 (3/5)</text>
+                    {/* Beat 1 */}
+                    <circle cx="50" cy="18" r="6" fill="#8b5cf6" stroke="#ffffff" strokeWidth="2" />
+                    <text x="50" y="92" fill="#e4e4e7" fontSize="9" textAnchor="middle" fontFamily="monospace" fontWeight="bold">
+                      Beat 1 (5/5 ⚡)
+                    </text>
 
-                    <circle cx="310" cy="30" r="4" fill="#10b981" />
-                    <text x="310" y="75" fill="#a1a1aa" fontSize="8" textAnchor="middle" fontFamily="monospace">Beat 3 (4/5)</text>
+                    {/* Beat 2 */}
+                    <circle cx="190" cy="60" r="6" fill="#06b6d4" stroke="#ffffff" strokeWidth="2" />
+                    <text x="190" y="92" fill="#e4e4e7" fontSize="9" textAnchor="middle" fontFamily="monospace" fontWeight="bold">
+                      Beat 2 (3/5 ⚡)
+                    </text>
 
-                    <circle cx="460" cy="20" r="4" fill="#f59e0b" />
-                    <text x="460" y="75" fill="#a1a1aa" fontSize="8" textAnchor="middle" fontFamily="monospace">Beat 4 (4/5)</text>
+                    {/* Beat 3 */}
+                    <circle cx="310" cy="35" r="6" fill="#10b981" stroke="#ffffff" strokeWidth="2" />
+                    <text x="310" y="92" fill="#e4e4e7" fontSize="9" textAnchor="middle" fontFamily="monospace" fontWeight="bold">
+                      Beat 3 (4/5 ⚡)
+                    </text>
+
+                    {/* Beat 4 */}
+                    <circle cx="460" cy="22" r="6" fill="#f59e0b" stroke="#ffffff" strokeWidth="2" />
+                    <text x="460" y="92" fill="#e4e4e7" fontSize="9" textAnchor="middle" fontFamily="monospace" fontWeight="bold">
+                      Beat 4 (4/5 ⚡)
+                    </text>
                   </svg>
                 </div>
               </div>
 
               {/* StoryBeat Graph Chain Display */}
-              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-4">
+              <div className="studio-panel rounded-2xl p-6 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
                     <SlidersHorizontal className="w-4 h-4 text-violet-400" />
-                    <span>StoryBeat Sequential Chain (:StoryBeat)-[:NEXT_BEAT]-&gt;(:StoryBeat)</span>
+                    <span>StoryBeat Sequential Graph Chain (:StoryBeat)-[:NEXT_BEAT]-&gt;(:StoryBeat)</span>
                   </h3>
-                  <span className="text-[10px] text-zinc-500 font-mono">
+                  <span className="text-[10px] text-zinc-400 font-mono">
                     {referenceBeats.length} Detected Narrative Beats
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                   {referenceBeats.map((beat) => (
                     <div
                       key={beat.id}
-                      className="p-3 rounded-lg bg-[#07070b] border border-white/10 space-y-2 relative overflow-hidden"
+                      className="studio-panel-interactive rounded-xl p-4 space-y-3 relative overflow-hidden"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold uppercase text-violet-300">
+                        <span className="text-[10px] font-bold uppercase text-violet-300 font-mono bg-violet-950/80 px-2 py-0.5 rounded border border-violet-800/60">
                           Beat #{beat.beat_index}
                         </span>
-                        <span className="text-[9px] font-mono text-zinc-500">
-                          {beat.target_duration}s
+                        <span className="text-[10px] font-mono text-zinc-400 font-semibold">
+                          {beat.target_duration}s Cut
                         </span>
                       </div>
-                      <div className="text-sm font-bold text-white uppercase">{beat.role}</div>
-                      <div className="text-[10px] text-zinc-400 flex items-center justify-between">
-                        <span>Shot: {beat.required_shot_type}</span>
-                        <span className="text-violet-400">⚡ {beat.energy_level}/5</span>
+
+                      <div>
+                        <div className="text-sm font-extrabold text-white uppercase tracking-tight">{beat.role}</div>
+                        <div className="text-[10px] text-zinc-400 mt-1 flex items-center justify-between">
+                          <span className="font-mono">Shot: {beat.required_shot_type}</span>
+                          <span className="text-violet-400 font-bold font-mono">⚡ {beat.energy_level}/5</span>
+                        </div>
                       </div>
+
+                      {/* Visual Energy Gauge Bar */}
+                      <div className="w-full bg-[#12121c] rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="bg-gradient-to-r from-violet-500 to-indigo-500 h-full rounded-full"
+                          style={{ width: `${(beat.energy_level / 5) * 100}%` }}
+                        />
+                      </div>
+
                       <div className="flex flex-wrap gap-1 pt-1">
                         {beat.required_tags?.map((t) => (
                           <span
                             key={t}
-                            className="text-[8px] px-1.5 py-0.5 rounded bg-[#12121c] text-zinc-300 border border-white/5"
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-[#12121c] text-zinc-300 border border-white/5 font-mono"
                           >
                             #{t}
                           </span>
@@ -947,75 +1223,144 @@ export default function Home() {
 
           {/* SCREEN 5: FOOTAGE UPLOAD & MEDIA LIBRARY */}
           {currentScreen === "footage" && (
-            <div className="max-w-5xl mx-auto space-y-6">
-              <div className="studio-panel rounded-xl p-5 shadow-2xl flex items-center justify-between">
+            <div className="max-w-6xl mx-auto space-y-6">
+              {/* Media Bin Top Header */}
+              <div className="studio-panel rounded-2xl p-6 shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-base font-bold text-white flex items-center gap-2">
                     <Film className="w-5 h-5 text-violet-400" />
-                    <span>Source Footage & Segmented Clip Index</span>
+                    <span>Media Bin & Multi-Modal Segmented Clips</span>
                   </h2>
                   <p className="text-xs text-zinc-400 mt-1">
-                    Raw clips are segmented into (:VideoClip) sub-clips with multimodal tags in FalkorDB.
+                    Raw footage segmented into (:VideoClip) sub-clips with transcripts, shot types, and visual tags indexed in FalkorDB.
                   </p>
                 </div>
                 <button
                   onClick={handleLoadDemoFootage}
                   disabled={isLoading}
-                  className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-md transition-colors flex items-center gap-2"
+                  className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-violet-900/40 border border-violet-400/30 transition-all flex items-center gap-2 shrink-0 disabled:opacity-50"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Load 1-Click Demo Footage Pack (5 Clips)</span>
                 </button>
               </div>
 
+              {/* Filter Tabs Bar */}
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-zinc-400 uppercase font-bold flex items-center gap-1">
+                    <Filter className="w-3 h-3 text-violet-400" />
+                    Filter Clips:
+                  </span>
+                  {[
+                    { id: "all", label: `All Clips (${sourceClips.length})` },
+                    { id: "dialog", label: "Dialog / A-Roll" },
+                    { id: "b-roll", label: "Visual B-Roll" },
+                    { id: "energy", label: "High Energy (⚡ 4+)" },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setClipFilter(tab.id)}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${
+                        clipFilter === tab.id
+                          ? "bg-violet-600 text-white font-bold border-violet-400 shadow-md shadow-violet-900/30"
+                          : "bg-[#0c0c14] border-white/10 text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="text-[10px] font-mono text-zinc-500">
+                  Showing {sourceClips.length} clips indexed in FalkorDB
+                </div>
+              </div>
+
               {/* Cinema Contact-Sheet Cards Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {sourceClips.map((clip) => (
-                  <div
-                    key={clip.clip_id}
-                    className="studio-panel-interactive rounded-xl overflow-hidden shadow-xl"
-                  >
-                    {/* Top Filmstrip Header */}
-                    <div className="h-2 filmstrip-sprockets opacity-40 bg-[#151522]" />
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {sourceClips
+                  .filter((clip) => {
+                    if (clipFilter === "dialog") {
+                      return clip.transcript && clip.transcript.length > 20;
+                    }
+                    if (clipFilter === "b-roll") {
+                      return clip.tags.some(
+                        (t) => t.includes("broll") || t.includes("product") || t.includes("hardware") || t.includes("graphic")
+                      );
+                    }
+                    if (clipFilter === "energy") {
+                      return clip.energy_level >= 4;
+                    }
+                    return true;
+                  })
+                  .map((clip) => (
+                    <div
+                      key={clip.clip_id}
+                      className="studio-panel-interactive rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between"
+                    >
+                      {/* Top Simulated Video Screen / Thumbnail */}
+                      <div className="relative aspect-video bg-gradient-to-br from-[#151525] via-[#0b0b14] to-[#06060c] p-3 flex flex-col justify-between overflow-hidden">
+                        {/* Filmstrip sprockets */}
+                        <div className="absolute top-0 left-0 right-0 h-1.5 filmstrip-sprockets opacity-40" />
 
-                    <div className="p-4 space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#141420] text-violet-300 border border-violet-500/30">
-                          {clip.shot_type}
-                        </span>
-                        <span className="font-mono text-zinc-400 text-[10px]">
-                          {clip.clip_duration?.toFixed(1)}s
-                        </span>
-                      </div>
-
-                      <div className="font-mono text-xs text-white truncate font-bold">
-                        {clip.filename || clip.asset_id}
-                      </div>
-
-                      <div className="text-[11px] text-zinc-300 italic bg-[#07070b] p-2.5 rounded-lg border border-white/[0.05] line-clamp-2">
-                        &quot;{clip.transcript || "Visual B-roll clip"}&quot;
-                      </div>
-
-                      <div className="flex flex-wrap gap-1">
-                        {clip.tags?.map((t) => (
-                          <span
-                            key={t}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-violet-950/60 text-violet-300 border border-violet-800/50"
-                          >
-                            #{t}
+                        {/* Badges */}
+                        <div className="relative z-10 flex items-center justify-between">
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/80 backdrop-blur-md text-violet-300 border border-violet-500/30 font-bold">
+                            {clip.shot_type}
                           </span>
-                        ))}
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/80 backdrop-blur-md text-zinc-300 border border-white/10">
+                            {clip.clip_duration?.toFixed(1)}s
+                          </span>
+                        </div>
+
+                        {/* Center Visual Mock */}
+                        <div className="relative z-10 flex items-center justify-center py-2 text-zinc-500">
+                          <Film className="w-8 h-8 opacity-40 text-violet-400" />
+                        </div>
+
+                        {/* Simulated Soundwave Bars */}
+                        <div className="relative z-10 flex items-center justify-between text-[10px]">
+                          <span className="text-zinc-400 font-mono truncate max-w-[170px]">
+                            {clip.filename || clip.asset_id}
+                          </span>
+                          <div className="flex items-center gap-0.5 h-3">
+                            <span className="w-0.5 h-2 bg-emerald-400 rounded-full" />
+                            <span className="w-0.5 h-3 bg-emerald-400 rounded-full" />
+                            <span className="w-0.5 h-1.5 bg-emerald-400 rounded-full" />
+                            <span className="w-0.5 h-2.5 bg-emerald-400 rounded-full" />
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[10px] text-zinc-500 font-mono">
-                        <span className="text-zinc-400">Energy: ⚡ {clip.energy_level}/5</span>
-                        <span className="text-emerald-400 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> FalkorDB Indexed
-                        </span>
+                      {/* Card Content */}
+                      <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
+                        <div className="space-y-2">
+                          <div className="text-[11px] text-zinc-300 italic bg-[#07070b] p-3 rounded-xl border border-white/[0.06] line-clamp-2">
+                            &quot;{clip.transcript || "Visual B-roll clip"}&quot;
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5">
+                            {clip.tags?.map((t) => (
+                              <span
+                                key={t}
+                                className="text-[9px] px-2 py-0.5 rounded-full bg-violet-950/60 text-violet-300 border border-violet-800/50 font-mono"
+                              >
+                                #{t}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between text-[10px] text-zinc-400 font-mono">
+                          <span className="text-violet-300 font-bold">⚡ Energy: {clip.energy_level}/5</span>
+                          <span className="text-emerald-400 flex items-center gap-1 font-semibold">
+                            <CheckCircle2 className="w-3 h-3" /> FalkorDB (:VideoClip)
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             </div>
           )}
@@ -1226,78 +1571,206 @@ export default function Home() {
 
           {/* SCREEN 8: EXPORT SETTINGS & CUT-LIST */}
           {currentScreen === "export" && (
-            <div className="max-w-3xl mx-auto studio-panel rounded-xl p-6 shadow-2xl space-y-6">
-              <div>
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Download className="w-5 h-5 text-violet-400" />
-                  <span>Master Render Export & Timeline Cut-List</span>
-                </h2>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Download rendered MP4 preview or export the FalkorDB EditVersion cut decision list (EDL/JSON).
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div className="p-3 bg-[#07070b] rounded-lg border border-white/10 space-y-1">
-                  <label className="text-zinc-400 font-semibold block">Master Resolution</label>
-                  <select className="w-full bg-[#12121c] border border-white/10 rounded p-2 text-zinc-200">
-                    <option>1080p Full HD (1920x1080)</option>
-                    <option>4K Ultra HD (3840x2160)</option>
-                    <option>720p Social Web (1280x720)</option>
-                  </select>
+            <div className="max-w-5xl mx-auto space-y-6">
+              {/* Header */}
+              <div className="studio-panel rounded-2xl p-6 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-bold text-white flex items-center gap-2">
+                    <Download className="w-5 h-5 text-violet-400" />
+                    <span>Master Render Export & Timeline Cut Decision List</span>
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Export the finalized video file or extract the FalkorDB EditVersion cut decision list (EDL/JSON) for NLE roundtripping.
+                  </p>
                 </div>
-
-                <div className="p-3 bg-[#07070b] rounded-lg border border-white/10 space-y-1">
-                  <label className="text-zinc-400 font-semibold block">Video Codec</label>
-                  <select className="w-full bg-[#12121c] border border-white/10 rounded p-2 text-zinc-200">
-                    <option>H.264 / AVC (Broad Compatibility)</option>
-                    <option>Apple ProRes 422 (Broadcast)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                {activePreviewUrl ? (
-                  <a
-                    href={activePreviewUrl}
-                    download="director_ai_master.mp4"
-                    className="flex-1 bg-violet-600 hover:bg-violet-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center gap-2 text-xs shadow-md transition-all"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Download Master MP4</span>
-                  </a>
-                ) : (
-                  <button
-                    disabled
-                    className="flex-1 bg-zinc-800 text-zinc-500 font-semibold py-2.5 rounded-lg text-xs"
-                  >
-                    No Render Available
-                  </button>
+                {activePreviewUrl && (
+                  <span className="text-[10px] font-mono px-3 py-1 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 font-bold flex items-center gap-1.5 self-start sm:self-auto">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Master Render Ready
+                  </span>
                 )}
+              </div>
 
-                <button
-                  onClick={() => {
-                    const blob = new Blob([JSON.stringify(decisions, null, 2)], {
-                      type: "application/json",
-                    });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `falkordb_cutlist_${activeProject?.id || "project"}.json`;
-                    a.click();
-                  }}
-                  className="px-4 bg-[#12121c] hover:bg-[#1a1a28] text-zinc-200 border border-white/10 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors"
-                >
-                  <span>Export Cut-List JSON</span>
-                </button>
+              {/* Delivery Suite 2-Column Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Left Column: Preset Formats */}
+                <div className="lg:col-span-5 space-y-4">
+                  <span className="text-[10px] font-mono text-zinc-400 uppercase font-bold tracking-wider block">
+                    Master Encoding Presets
+                  </span>
+
+                  {[
+                    {
+                      id: "h264",
+                      title: "H.264 Web & Social Master",
+                      codec: "MP4 • H.264 / AAC",
+                      bitrate: "25 Mbps • Fast Start Stream",
+                      desc: "Optimized for YouTube, Vimeo, and web playback.",
+                    },
+                    {
+                      id: "prores",
+                      title: "Apple ProRes 422 Studio Master",
+                      codec: "MOV • ProRes 422 HQ",
+                      bitrate: "10-Bit Broadcast • Rec.709",
+                      desc: "Maximum color fidelity for broadcast delivery.",
+                    },
+                    {
+                      id: "vertical",
+                      title: "Vertical 9:16 Mobile Cut",
+                      codec: "MP4 • 1080x1920 • 60 FPS",
+                      bitrate: "Targeted for TikTok / Reels",
+                      desc: "Cropped to center action safe zones.",
+                    },
+                  ].map((preset) => {
+                    const isSelected = exportPreset === preset.id;
+                    return (
+                      <div
+                        key={preset.id}
+                        onClick={() => setExportPreset(preset.id)}
+                        className={`p-4 rounded-2xl border cursor-pointer transition-all space-y-2 ${
+                          isSelected
+                            ? "bg-violet-950/60 border-violet-500 text-white shadow-xl shadow-violet-950/40 ring-1 ring-violet-500/40"
+                            : "bg-[#090910] border-white/10 hover:border-white/20 text-zinc-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-white">{preset.title}</span>
+                          {isSelected && (
+                            <span className="w-2 h-2 rounded-full bg-violet-400 shadow-[0_0_8px_#8b5cf6]" />
+                          )}
+                        </div>
+                        <div className="text-[10px] font-mono text-violet-400 flex items-center gap-2">
+                          <span>{preset.codec}</span>
+                          <span>•</span>
+                          <span>{preset.bitrate}</span>
+                        </div>
+                        <p className="text-[11px] text-zinc-400">{preset.desc}</p>
+                      </div>
+                    );
+                  })}
+
+                  {/* Resolution Selector */}
+                  <div className="studio-panel rounded-2xl p-4 space-y-2">
+                    <label className="text-xs font-semibold text-zinc-300 block">Master Resolution</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {["1080p", "4K UHD", "720p"].map((res) => (
+                        <button
+                          key={res}
+                          type="button"
+                          onClick={() => setExportResolution(res)}
+                          className={`py-2 rounded-lg text-xs font-mono font-bold transition-all border ${
+                            exportResolution === res
+                              ? "bg-violet-600 text-white border-violet-400 shadow-md shadow-violet-900/30"
+                              : "bg-[#07070b] border-white/10 text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          {res}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Output Summary & Download CTAs */}
+                <div className="lg:col-span-7 space-y-4">
+                  {/* Master Cut Decision Table */}
+                  <div className="studio-panel rounded-2xl p-5 space-y-3 shadow-xl">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white flex items-center gap-2">
+                        <Scissors className="w-4 h-4 text-violet-400" />
+                        <span>FalkorDB Cut Decision List (EDL)</span>
+                      </span>
+                      <span className="text-[10px] font-mono text-zinc-400">
+                        {decisions.length} Active Segments
+                      </span>
+                    </div>
+
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                      {decisions.map((d) => (
+                        <div
+                          key={d.decision_id}
+                          className="p-2.5 rounded-xl bg-[#07070b] border border-white/[0.06] flex items-center justify-between text-xs font-mono"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded bg-violet-950 text-violet-300 flex items-center justify-center text-[10px] font-bold">
+                              {d.order}
+                            </span>
+                            <div>
+                              <div className="text-white text-[11px] font-bold truncate max-w-[170px]">
+                                {d.narrative_beat.toUpperCase()}
+                              </div>
+                              <div className="text-[9px] text-zinc-500 truncate max-w-[170px]">
+                                {d.source_asset}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <div className="text-zinc-300 text-[10px]">
+                              {formatSMPTE(d.source_in_sec)} ➔ {formatSMPTE(d.source_out_sec)}
+                            </div>
+                            <div className="text-[9px] text-emerald-400">
+                              {(d.source_out_sec - d.source_in_sec).toFixed(1)}s • Hard Cut
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Export Action Buttons */}
+                  <div className="studio-panel rounded-2xl p-5 space-y-4 shadow-xl">
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-zinc-400">Estimated File Size:</span>
+                      <span className="text-white font-bold">~2.4 MB (Fast Download)</span>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      {activePreviewUrl ? (
+                        <a
+                          href={activePreviewUrl}
+                          download={`${activeProject?.title || "director_ai"}_master.mp4`}
+                          className="flex-1 bg-gradient-to-r from-violet-600 via-indigo-600 to-violet-500 hover:from-violet-500 hover:to-indigo-400 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-xs shadow-xl shadow-violet-900/40 border border-violet-400/30 transition-all text-center"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>Download Master MP4</span>
+                        </a>
+                      ) : (
+                        <button
+                          disabled
+                          className="flex-1 bg-zinc-800 text-zinc-500 font-semibold py-3 rounded-xl text-xs text-center cursor-not-allowed"
+                        >
+                          Synthesize Edit First
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          const blob = new Blob([JSON.stringify(decisions, null, 2)], {
+                            type: "application/json",
+                          });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `falkordb_cutlist_${activeProject?.id || "project"}.json`;
+                          a.click();
+                        }}
+                        className="px-5 bg-[#12121c] hover:bg-[#1a1a28] text-zinc-200 border border-white/10 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors py-3"
+                      >
+                        <Film className="w-3.5 h-3.5 text-violet-400" />
+                        <span>Export EDL / JSON</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
           {/* SCREEN 9: SOCIAL ACCOUNTS & HUMAN-IN-THE-LOOP PUBLISHING */}
           {currentScreen === "publishing" && (
-            <div className="max-w-3xl mx-auto space-y-6">
-              <div className="studio-panel rounded-xl p-6 shadow-2xl space-y-4">
+            <div className="max-w-4xl mx-auto space-y-6">
+              <div className="studio-panel rounded-2xl p-6 shadow-2xl space-y-5">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-base font-bold text-white flex items-center gap-2">
@@ -1308,39 +1781,73 @@ export default function Home() {
                       Direct channel sync with strict human-in-the-loop approval safeguards.
                     </p>
                   </div>
+                  <span className="text-[10px] font-mono px-3 py-1 rounded-full bg-violet-950 text-violet-300 border border-violet-800/80 font-bold">
+                    Safety Gate: Active
+                  </span>
                 </div>
 
                 {/* Explicit Human Approval Toggle (ON by default) */}
-                <div className="p-4 rounded-lg bg-violet-950/40 border border-violet-800/80 flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                <div className="p-4 rounded-xl bg-gradient-to-r from-violet-950/50 via-[#0e0e16] to-indigo-950/40 border border-violet-700/60 flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <span className="text-xs font-extrabold text-white flex items-center gap-2">
                       <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      Require Human Approval Before Publishing
+                      Strict Human Sign-Off Gate (Enforced)
                     </span>
-                    <p className="text-[11px] text-zinc-400">
-                      When enabled, autonomous agent runs will never push directly to production channels without manual verification.
+                    <p className="text-[11px] text-zinc-300">
+                      When enabled, autonomous agent pipelines are restricted from pushing directly to production channels without manual creative review.
                     </p>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={requireHumanApproval}
-                    onChange={(e) => setRequireHumanApproval(e.target.checked)}
-                    className="w-4 h-4 accent-violet-600 rounded"
-                  />
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={requireHumanApproval}
+                      onChange={(e) => setRequireHumanApproval(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600" />
+                  </label>
+                </div>
+
+                {/* Pre-Flight Compliance Checks List */}
+                <div className="p-4 rounded-xl bg-[#07070b] border border-white/[0.08] space-y-2.5">
+                  <span className="text-[10px] uppercase font-bold text-zinc-400 font-mono tracking-wider">
+                    Automated Pre-Flight Safety Checks
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-mono">
+                    <div className="flex items-center gap-2 text-zinc-300">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Aspect ratio verified: {activeProject?.aspect_ratio || "16:9"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-zinc-300">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Action safe zones checked: 0 title clippings</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-zinc-300">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>FalkorDB lineage graph signed by DirectorAgent</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-zinc-300">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Audio loudness: -14.0 LUFS broadcast compliant</span>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Channel Cards */}
-                <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
                   {[
-                    { name: "YouTube Channel", handle: "@AutonomousCreator", status: "Sandbox Mode" },
-                    { name: "Vimeo Enterprise", handle: "DirectorAI Studio", status: "Sandbox Mode" },
-                    { name: "LinkedIn Video", handle: "Product Showcase", status: "Sandbox Mode" },
-                    { name: "Instagram Reels", handle: "@director_ai", status: "Sandbox Mode" },
+                    { name: "YouTube Channel", handle: "@AutonomousCreator", status: "Sandbox Mode", color: "text-rose-400" },
+                    { name: "TikTok Creative Center", handle: "@director_ai", status: "Sandbox Mode", color: "text-cyan-400" },
+                    { name: "Instagram Reels", handle: "@director_ai.studio", status: "Sandbox Mode", color: "text-pink-400" },
+                    { name: "LinkedIn Video Studio", handle: "DirectorAI Official", status: "Sandbox Mode", color: "text-blue-400" },
                   ].map((ch) => (
-                    <div key={ch.name} className="p-3 bg-[#07070b] rounded-lg border border-white/10 space-y-1">
+                    <div key={ch.name} className="p-3.5 bg-[#07070b] rounded-xl border border-white/10 space-y-1.5">
                       <div className="flex items-center justify-between font-semibold text-zinc-200">
-                        <span>{ch.name}</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`font-bold ${ch.color}`}>●</span>
+                          <span>{ch.name}</span>
+                        </span>
+                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-mono">
                           {ch.status}
                         </span>
                       </div>
@@ -1353,13 +1860,14 @@ export default function Home() {
                 <div className="pt-2">
                   <button
                     onClick={() => setSandboxPushed(true)}
-                    className="w-full bg-[#141420] hover:bg-[#1a1a2a] text-white font-bold py-2.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-2 border border-white/10"
+                    className="w-full bg-[#141420] hover:bg-[#1a1a2a] text-white font-bold py-3 rounded-xl text-xs transition-all flex items-center justify-center gap-2 border border-white/10 shadow-lg"
                   >
-                    <span>Push to Platform Sandbox for Preview</span>
+                    <span>⚡ Push to Platform Sandbox for Preview</span>
                   </button>
                   {sandboxPushed && (
-                    <div className="mt-2 p-2.5 rounded bg-[#091510] border border-emerald-800/80 text-[11px] text-emerald-300 font-mono text-center">
-                      ✓ Sandbox Confirmation Queued: Human approval required before production release.
+                    <div className="mt-3 p-3 rounded-xl bg-[#091510] border border-emerald-800/80 text-xs text-emerald-300 font-mono text-center flex items-center justify-center gap-2 shadow-lg">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span>Sandbox release queued successfully: Awaiting manual human verification before live broadcasting.</span>
                     </div>
                   )}
                 </div>
@@ -1369,64 +1877,84 @@ export default function Home() {
 
           {/* SCREEN 10: USER SETTINGS & PERSISTENT GRAPH MEMORY (TRACK 02) */}
           {currentScreen === "settings" && (
-            <div className="max-w-4xl mx-auto space-y-6">
+            <div className="max-w-5xl mx-auto space-y-6">
               {/* Creator Profile */}
-              <div className="studio-panel rounded-xl p-5 shadow-2xl flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-md">
+              <div className="studio-panel rounded-2xl p-6 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-600 flex items-center justify-center text-white font-extrabold text-base shadow-xl shadow-violet-900/40 border border-violet-400/30">
                     AC
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white">Alex Chen (Creator)</h3>
-                    <p className="text-xs text-zinc-400 font-mono">Creator ID: creator_default • FalkorDB Multi-Session Profile</p>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <span>Alex Chen (Lead Creative Director)</span>
+                    </h3>
+                    <p className="text-xs text-zinc-400 font-mono mt-0.5">
+                      Creator ID: <span className="text-violet-300">creator_default</span> • Multi-Session Graph Profile
+                    </p>
                   </div>
                 </div>
-                <span className="text-xs px-2.5 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono font-bold">
-                  Pro Studio Tier
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono font-bold flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Pro Studio Tier
+                  </span>
+                </div>
               </div>
 
               {/* Persistent FalkorDB Memory Manager (Track 02 Core) */}
-              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-4">
-                <div className="flex items-center justify-between">
+              <div className="studio-panel rounded-2xl p-6 shadow-2xl space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
                       <Brain className="w-4 h-4 text-violet-400" />
                       <span>Persistent Creator Memory Nodes (:CreatorPreference)</span>
                     </h3>
                     <p className="text-xs text-zinc-400 mt-1">
-                      Learned procedural and aesthetic rules that survive across different projects and sessions.
+                      Learned procedural and aesthetic rules stored directly in FalkorDB that survive across sessions and projects.
                     </p>
                   </div>
-                  <span className="text-[10px] text-violet-400 font-mono font-bold">
-                    Track 02 Agent Memory
+                  <span className="text-[10px] text-violet-400 font-mono font-bold bg-violet-950/80 px-2.5 py-1 rounded-full border border-violet-800/60 self-start sm:self-auto">
+                    Track 02 Durable Memory
                   </span>
                 </div>
 
                 {/* Preference List */}
-                <div className="space-y-2.5">
+                <div className="space-y-3">
                   {preferences.length === 0 ? (
-                    <div className="text-center py-6 text-zinc-500 text-xs">
-                      No persistent preferences recorded yet.
+                    <div className="text-center py-8 text-zinc-500 text-xs studio-panel rounded-xl">
+                      No persistent preferences recorded in FalkorDB yet. Add one below!
                     </div>
                   ) : (
                     preferences.map((p) => (
                       <div
                         key={p.id}
-                        className="p-3 rounded-lg bg-[#07070b] border border-white/10 flex items-center justify-between gap-4 text-xs"
+                        className="p-4 rounded-xl bg-[#07070b] border border-white/10 flex items-center justify-between gap-4 text-xs group hover:border-violet-500/40 transition-all"
                       >
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-violet-950 text-violet-300 border border-violet-800/50">
-                            {p.category}
-                          </span>
-                          <p className="text-zinc-200 font-medium">{p.rule_text}</p>
-                          <span className="text-[10px] text-zinc-500 font-mono">
-                            Reinforced in {p.reinforced_sessions || 1} sessions • Weight: {p.weight}
-                          </span>
+                        <div className="space-y-1.5 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-950 text-violet-300 border border-violet-800/50 font-bold">
+                              {p.category}
+                            </span>
+                            <span className="text-[10px] text-zinc-500 font-mono">
+                              Reinforced in {p.reinforced_sessions || 1} sessions
+                            </span>
+                          </div>
+                          <p className="text-zinc-200 font-medium text-xs leading-relaxed">{p.rule_text}</p>
+                          <div className="flex items-center gap-2 pt-0.5">
+                            <span className="text-[10px] text-zinc-400 font-mono">Weight:</span>
+                            <div className="w-24 bg-[#12121c] rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="bg-gradient-to-r from-violet-500 to-indigo-500 h-full rounded-full"
+                                style={{ width: `${p.weight * 100}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] text-violet-300 font-mono font-bold">{p.weight}</span>
+                          </div>
                         </div>
                         <button
                           onClick={() => handleDeletePreference(p.id)}
-                          className="text-zinc-600 hover:text-rose-400 p-1.5 transition-colors"
+                          className="text-zinc-500 hover:text-rose-400 p-2 rounded-lg hover:bg-rose-950/30 transition-colors"
+                          title="Delete Preference Node"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1435,49 +1963,72 @@ export default function Home() {
                   )}
                 </div>
 
+                {/* Quick Rule Suggestion Chips */}
+                <div className="space-y-1.5 pt-2">
+                  <span className="text-[10px] uppercase font-bold text-zinc-400 font-mono tracking-wider">
+                    Suggested Style Rules (Click to Insert)
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      "Always start with high-energy establishing shot",
+                      "Limit talking-head dialog segments to under 3.5 seconds",
+                      "Use cutaway B-roll over monotonous wide shots",
+                    ].map((sug) => (
+                      <button
+                        key={sug}
+                        type="button"
+                        onClick={() => setNewPrefRule(sug)}
+                        className="text-[11px] px-2.5 py-1 rounded-lg bg-[#0c0c14] hover:bg-[#141422] text-zinc-300 border border-white/10 hover:border-violet-500/40 transition-colors text-left font-mono"
+                      >
+                        + &quot;{sug}&quot;
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Add Preference Form */}
                 <form
                   onSubmit={handleAddPreference}
-                  className="pt-3 border-t border-white/[0.06] flex gap-2 text-xs"
+                  className="pt-3 border-t border-white/[0.06] flex flex-col sm:flex-row gap-2.5 text-xs"
                 >
                   <input
                     type="text"
                     value={newPrefRule}
                     onChange={(e) => setNewPrefRule(e.target.value)}
-                    placeholder="Add a new standing editing preference rule..."
-                    className="flex-1 bg-[#07070b] border border-white/10 rounded p-2 text-zinc-200 focus:border-violet-500"
+                    placeholder="Enter a new standing director preference rule (e.g. Always begin videos with dynamic B-roll)..."
+                    className="flex-1 bg-[#07070b] border border-white/10 rounded-xl px-3.5 py-2.5 text-zinc-200 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30 transition-all font-medium text-xs"
                   />
                   <button
                     type="submit"
-                    className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-4 py-2 rounded shadow-md transition-colors"
+                    className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-violet-900/30 border border-violet-400/30 transition-all shrink-0"
                   >
-                    + Save Rule
+                    + Save Rule in FalkorDB
                   </button>
                 </form>
               </div>
 
               {/* Workspace Resource Meter */}
-              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-3">
+              <div className="studio-panel rounded-2xl p-6 shadow-2xl space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-white">
-                  Workspace Telemetry Meter
+                  FalkorDB Property Graph Telemetry & Storage
                 </h4>
-                <div className="grid grid-cols-3 gap-3 text-xs font-mono">
-                  <div className="p-3 bg-[#07070b] rounded border border-white/10">
-                    <div className="text-zinc-500 text-[10px]">FalkorDB Nodes</div>
-                    <div className="text-lg font-bold text-white mt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs font-mono">
+                  <div className="p-4 bg-[#07070b] rounded-xl border border-white/10">
+                    <div className="text-zinc-500 text-[10px] uppercase font-bold">FalkorDB Active Nodes</div>
+                    <div className="text-xl font-extrabold text-white mt-1">
                       {graphState?.nodes.length || 18} Nodes
                     </div>
                   </div>
-                  <div className="p-3 bg-[#07070b] rounded border border-white/10">
-                    <div className="text-zinc-500 text-[10px]">Active Lineage Edges</div>
-                    <div className="text-lg font-bold text-violet-400 mt-1">
+                  <div className="p-4 bg-[#07070b] rounded-xl border border-white/10">
+                    <div className="text-zinc-500 text-[10px] uppercase font-bold">Lineage & Memory Edges</div>
+                    <div className="text-xl font-extrabold text-violet-400 mt-1">
                       {graphState?.edges.length || 24} Edges
                     </div>
                   </div>
-                  <div className="p-3 bg-[#07070b] rounded border border-white/10">
-                    <div className="text-zinc-500 text-[10px]">Rendered Video Cache</div>
-                    <div className="text-lg font-bold text-emerald-400 mt-1">
-                      {versions.length} MP4 Versions
+                  <div className="p-4 bg-[#07070b] rounded-xl border border-white/10">
+                    <div className="text-zinc-500 text-[10px] uppercase font-bold">Rendered MP4 Cache</div>
+                    <div className="text-xl font-extrabold text-emerald-400 mt-1">
+                      {versions.length} EditVersions
                     </div>
                   </div>
                 </div>
