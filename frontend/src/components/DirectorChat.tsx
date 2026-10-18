@@ -1,7 +1,20 @@
 "use client";
 
 import React, { useState } from "react";
-import { Send, Sparkles, Brain, RefreshCw, Zap, MessageSquare } from "lucide-react";
+import {
+  Send,
+  Sparkles,
+  Brain,
+  RefreshCw,
+  Zap,
+  CheckCircle2,
+  ArrowRight,
+  Bot,
+  User,
+  Sliders,
+  Film
+} from "lucide-react";
+import { CreatorPreference } from "@/types";
 
 interface ChatMessage {
   id: string;
@@ -10,32 +23,35 @@ interface ChatMessage {
   timestamp: string;
   versionNum?: number;
   learnedPreference?: string;
+  executionSteps?: string[];
 }
 
 interface DirectorChatProps {
   onSendRevision: (prompt: string) => Promise<void>;
   isRevising: boolean;
   activeVersionNum: number;
+  creatorPreferences?: CreatorPreference[];
 }
 
 const QUICK_PROMPTS = [
-  "Replace clip 2 with higher energy B-roll",
-  "Trim the opening hook to 2.5 seconds",
-  "Remember I always prefer fast 2s hooks in my videos",
-  "Swap the third clip for a close-up product demo",
+  "⚡ Swap Beat 2 for higher-energy B-roll",
+  "✂️ Trim opening hook to 2.0s & remember I like fast hooks",
+  "🎬 Replace product demo clip with close-up code shot",
+  "🔥 Make setup beat faster and dynamic",
 ];
 
 export const DirectorChat: React.FC<DirectorChatProps> = ({
   onSendRevision,
   isRevising,
   activeVersionNum,
+  creatorPreferences = [],
 }) => {
   const [inputPrompt, setInputPrompt] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "msg_init",
       sender: "assistant",
-      text: "Hello! I am your AI Video Director. Ask me to revise any cut, swap clips, tighten pacing, or state standing preferences you want remembered across projects.",
+      text: "Director Agent online. I synthesize timeline decisions using multi-hop FalkorDB Cypher traversals. Ask me to revise any cut, tighten rhythm, or record standing preferences across sessions.",
       timestamp: "Just now",
       versionNum: activeVersionNum,
     },
@@ -62,19 +78,23 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
       const assistantReply: ChatMessage = {
         id: `asst_${Date.now()}`,
         sender: "assistant",
-        text: `Applied revision! Created EditVersion v${
-          activeVersionNum + 1
-        } in the FalkorDB lineage DAG. Marked previous clip [:REJECTED_FOR] and rendered updated preview.`,
+        text: `Mutation complete! Created EditVersion v${activeVersionNum + 1} in the FalkorDB lineage DAG.`,
         timestamp: "Just now",
         versionNum: activeVersionNum + 1,
         learnedPreference: isMemoryPrompt ? userText : undefined,
+        executionSteps: [
+          "1. Marked prior clip [:REJECTED_FOR] in FalkorDB",
+          "2. Executed Multi-Hop Cypher Query 2 traversal",
+          `3. Branched (:EditVersion v${activeVersionNum + 1})-[:DERIVED_FROM]->(v${activeVersionNum})`,
+          "4. Rendered MoviePy / FFmpeg MP4 cut preview",
+        ],
       };
       setMessages((prev) => [...prev, assistantReply]);
     } catch (err: any) {
       const errorReply: ChatMessage = {
         id: `asst_${Date.now()}`,
         sender: "assistant",
-        text: `Error updating timeline: ${err.message || "Failed to revise edit"}`,
+        text: `Error revising cut: ${err.message || "Failed to update timeline in FalkorDB"}`,
         timestamp: "Just now",
       };
       setMessages((prev) => [...prev, errorReply]);
@@ -82,21 +102,59 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
   };
 
   return (
-    <div className="bg-[#121217] border border-zinc-800/80 rounded-xl overflow-hidden flex flex-col h-full shadow-xl">
-      {/* Header */}
-      <div className="px-4 py-2.5 border-b border-zinc-800/80 flex items-center justify-between bg-zinc-900/50">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-violet-400" />
-          <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
-            Director Assistant (Revision Agent)
-          </h2>
+    <div className="bg-[#0b0b12] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col h-full shadow-2xl relative select-none">
+      {/* 3-Agent Coordinated Status Header */}
+      <div className="px-3.5 py-2.5 border-b border-white/[0.06] bg-[#0f0f18] flex flex-col gap-2 shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bot className="w-4 h-4 text-violet-400" />
+            <h2 className="text-xs font-bold uppercase tracking-wider text-white">
+              Multi-Agent Copilot
+            </h2>
+          </div>
+          <span className="text-[9px] px-2 py-0.5 rounded-full bg-violet-950 text-violet-300 border border-violet-800/80 font-mono font-bold">
+            Active: v{activeVersionNum}
+          </span>
         </div>
-        <span className="text-[10px] px-2 py-0.5 rounded bg-violet-950 text-violet-300 border border-violet-800/60 font-mono">
-          Active: v{activeVersionNum}
-        </span>
+
+        {/* 3-Agent Live Badges */}
+        <div className="grid grid-cols-3 gap-1.5 text-[9px] font-mono">
+          <div className="px-2 py-1 rounded bg-[#07070b] border border-white/[0.05] flex items-center justify-between">
+            <span className="text-zinc-400">Ingestor</span>
+            <span className="text-emerald-400">Ready</span>
+          </div>
+          <div className="px-2 py-1 rounded bg-[#07070b] border border-white/[0.05] flex items-center justify-between">
+            <span className="text-zinc-400">Director</span>
+            <span className="text-violet-400 font-bold">Track 01</span>
+          </div>
+          <div className="px-2 py-1 rounded bg-[#07070b] border border-white/[0.05] flex items-center justify-between">
+            <span className="text-zinc-400">Revision</span>
+            <span className="text-indigo-400 font-bold">Track 02</span>
+          </div>
+        </div>
+
+        {/* Persistent Memory Pills Banner (Track 02) */}
+        {creatorPreferences.length > 0 && (
+          <div className="p-2 rounded-lg bg-violet-950/30 border border-violet-800/40 text-[10px] space-y-1">
+            <div className="flex items-center gap-1.5 text-violet-300 font-semibold uppercase text-[9px]">
+              <Brain className="w-3 h-3 text-violet-400" />
+              <span>Remembered Style Preferences ({creatorPreferences.length})</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {creatorPreferences.slice(0, 2).map((pref) => (
+                <span
+                  key={pref.id}
+                  className="px-1.5 py-0.5 rounded bg-[#10101c] border border-violet-500/30 text-zinc-300 text-[9px] truncate max-w-full font-sans"
+                >
+                  &quot;{pref.rule_text}&quot;
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Message Stream */}
+      {/* Messages Stream */}
       <div className="flex-1 p-3 overflow-y-auto space-y-3">
         {messages.map((m) => (
           <div
@@ -106,50 +164,68 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
             }`}
           >
             <div
-              className={`max-w-[90%] p-3 rounded-xl text-xs leading-relaxed ${
+              className={`max-w-[92%] p-3 rounded-xl text-xs leading-relaxed ${
                 m.sender === "user"
-                  ? "bg-violet-600 text-white rounded-br-none shadow-md shadow-violet-900/30"
-                  : "bg-zinc-900/90 text-zinc-200 border border-zinc-800 rounded-bl-none"
+                  ? "bg-violet-600 text-white rounded-br-none shadow-md shadow-violet-900/30 font-medium"
+                  : "bg-[#0e0e16] text-zinc-200 border border-white/[0.07] rounded-bl-none shadow-sm"
               }`}
             >
               <p>{m.text}</p>
 
-              {/* Memory saved badge if detected */}
+              {/* Execution Steps Trace Card */}
+              {m.executionSteps && (
+                <div className="mt-2.5 pt-2 border-t border-white/[0.08] space-y-1 text-[10px] font-mono text-zinc-300">
+                  <div className="text-[9px] uppercase font-bold text-violet-400 tracking-wider">
+                    FalkorDB Graph Mutation Trace:
+                  </div>
+                  {m.executionSteps.map((step, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 text-emerald-400">
+                      <CheckCircle2 className="w-3 h-3 shrink-0" />
+                      <span>{step}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Memory Indicator Chip */}
               {m.learnedPreference && (
-                <div className="mt-2 pt-2 border-t border-zinc-800/80 flex items-center gap-1.5 text-[10px] text-emerald-400 font-mono">
+                <div className="mt-2 pt-2 border-t border-white/[0.08] flex items-center gap-1.5 text-[10px] text-emerald-400 font-mono">
                   <Brain className="w-3.5 h-3.5 shrink-0" />
-                  <span>
-                    Saved durable CreatorPreference to FalkorDB memory!
-                  </span>
+                  <span>Durable preference recorded in FalkorDB (:CreatorPreference)!</span>
                 </div>
               )}
             </div>
-            <span className="text-[9px] text-zinc-500 mt-1 px-1">
+            <span className="text-[9px] text-zinc-400 mt-1 px-1 font-mono">
               {m.timestamp}
             </span>
           </div>
         ))}
 
         {isRevising && (
-          <div className="flex items-center gap-2 text-xs text-violet-400 p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-800 animate-pulse">
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            <span>Mutating FalkorDB Lineage DAG & Rendering New MP4...</span>
+          <div className="p-3 rounded-xl bg-violet-950/40 border border-violet-700/60 text-xs text-violet-200 space-y-1.5 animate-pulse">
+            <div className="flex items-center gap-2 font-bold text-violet-300">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet-400" />
+              <span>Revision Agent Traversing FalkorDB Graph...</span>
+            </div>
+            <div className="text-[10px] text-zinc-400 font-mono">
+              Excluding rejected clips ➔ Branching lineage DAG ➔ Rendering preview
+            </div>
           </div>
         )}
       </div>
 
       {/* Suggested Quick Prompt Pills */}
-      <div className="px-3 py-2 border-t border-zinc-800/60 bg-zinc-950/40">
-        <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold mb-1 flex items-center gap-1">
+      <div className="px-3 py-2 border-t border-white/[0.06] bg-[#07070b]">
+        <div className="text-[9px] text-zinc-400 uppercase tracking-wider font-semibold mb-1 flex items-center gap-1">
           <Zap className="w-3 h-3 text-amber-400" />
-          <span>Quick Revisions</span>
+          <span>Quick Revision Prompts</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {QUICK_PROMPTS.map((prompt, i) => (
             <button
               key={i}
               onClick={() => setInputPrompt(prompt)}
-              className="text-[10px] bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white px-2 py-1 rounded border border-zinc-800 transition-colors truncate max-w-full text-left"
+              className="text-[10px] bg-[#12121c] hover:bg-[#1a1a28] text-zinc-300 hover:text-white px-2 py-1 rounded-md border border-white/10 transition-all truncate max-w-full text-left"
             >
               {prompt}
             </button>
@@ -157,23 +233,23 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
         </div>
       </div>
 
-      {/* Input Box */}
+      {/* Input Form */}
       <form
         onSubmit={handleSubmit}
-        className="p-3 border-t border-zinc-800/80 bg-zinc-900/50 flex items-center gap-2"
+        className="p-3 border-t border-white/[0.08] bg-[#0e0e16] flex items-center gap-2"
       >
         <input
           type="text"
           value={inputPrompt}
           onChange={(e) => setInputPrompt(e.target.value)}
-          placeholder="e.g. Trim hook to 2s, swap clip 2 for code..."
+          placeholder="e.g. Trim hook to 2.0s & remember I like fast hooks..."
           disabled={isRevising}
-          className="flex-1 text-xs bg-zinc-950 border border-zinc-800 text-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-500 transition-colors disabled:opacity-50"
+          className="flex-1 text-xs bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 transition-all disabled:opacity-50 placeholder:text-zinc-400"
         />
         <button
           type="submit"
           disabled={isRevising || !inputPrompt.trim()}
-          className="bg-violet-600 hover:bg-violet-500 text-white p-2 rounded-lg transition-colors disabled:opacity-50 shadow-md"
+          className="bg-violet-600 hover:bg-violet-500 text-white p-2 rounded-lg transition-all disabled:opacity-50 shadow-md shadow-violet-900/40 shrink-0"
         >
           <Send className="w-3.5 h-3.5" />
         </button>

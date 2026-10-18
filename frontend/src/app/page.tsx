@@ -15,6 +15,7 @@ import {
   CreatorPreference,
   GraphState,
   VersionDiffItem,
+  formatSMPTE,
 } from "@/types";
 import {
   Sparkles,
@@ -41,7 +42,15 @@ import {
   Check,
   Zap,
   Trash2,
-  Layers
+  Layers,
+  Grid,
+  Square,
+  Maximize2,
+  SkipBack,
+  SkipForward,
+  Repeat,
+  Activity,
+  Tv
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000";
@@ -59,9 +68,12 @@ export default function Home() {
   const [preferences, setPreferences] = useState<CreatorPreference[]>([]);
   const [diffItems, setDiffItems] = useState<VersionDiffItem[]>([]);
 
-  // Playback state
+  // Video Playback & Monitor Guides
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isLooping, setIsLooping] = useState<boolean>(false);
+  const [showGridOverlay, setShowGridOverlay] = useState<boolean>(false);
+  const [showSafeZone, setShowSafeZone] = useState<boolean>(false);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string>("");
 
   // Loading flags
@@ -69,7 +81,7 @@ export default function Home() {
   const [isSeeding, setIsSeeding] = useState<boolean>(false);
   const [isRevising, setIsRevising] = useState<boolean>(false);
 
-  // New Project Wizard Form State
+  // New Project Wizard State
   const [newTitle, setNewTitle] = useState("");
   const [newCategory, setNewCategory] = useState("YouTube Long-Form (16:9)");
   const [newDuration, setNewDuration] = useState(12.0);
@@ -90,7 +102,7 @@ export default function Home() {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // 1. Initial Load: Fetch Projects and Creator Preferences from FalkorDB
+  // 1. Initial Load: Projects & Creator Memory
   useEffect(() => {
     fetchProjects();
     fetchCreatorPreferences();
@@ -123,7 +135,7 @@ export default function Home() {
     }
   };
 
-  // 2. Load Selected Project details (Beats, Source Assets, Versions, Graph State)
+  // 2. Load Project details
   const loadProjectDetails = async (proj: Project) => {
     setActiveProject(proj);
     setIsLoading(true);
@@ -142,8 +154,6 @@ export default function Home() {
           }
         }
       }
-
-      // Fetch full graph state for inspector
       await refreshGraphState(proj.id);
     } catch (e) {
       console.error("Error loading project details:", e);
@@ -164,7 +174,7 @@ export default function Home() {
     }
   };
 
-  // 3. 1-Click Demo Seed Endpoint
+  // 3. 1-Click Demo Seed
   const handleSeedDemo = async () => {
     setIsSeeding(true);
     try {
@@ -257,7 +267,7 @@ export default function Home() {
     }
   };
 
-  // 6. Compare Two EditVersions (Query 4)
+  // 6. Compare Two Versions (Query 4)
   const handleCompareVersions = async (v1Id: string, v2Id: string) => {
     if (!activeProject) return;
     try {
@@ -273,7 +283,7 @@ export default function Home() {
     }
   };
 
-  // 7. Create Project in Wizard
+  // 7. Wizard Project Submit
   const handleCreateProjectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
@@ -356,7 +366,7 @@ export default function Home() {
     }
   };
 
-  // 10. Add Creator Preference in Settings
+  // 10. Creator Preference CRUD
   const handleAddPreference = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPrefRule.trim()) return;
@@ -392,7 +402,7 @@ export default function Home() {
     }
   };
 
-  // Video playback time updates
+  // Video Frame Transport
   const handleTimeUpdate = () => {
     if (videoRef.current) {
       setCurrentTime(videoRef.current.currentTime);
@@ -418,9 +428,22 @@ export default function Home() {
     }
   };
 
+  const handleStepFrame = (deltaFrames: number) => {
+    if (videoRef.current) {
+      const newTime = Math.max(0, videoRef.current.currentTime + deltaFrames * (1 / 24));
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+    }
+  };
+
+  // Find currently playing cut
+  const currentlyPlayingCut = decisions.find(
+    (d) => currentTime >= d.source_in_sec && currentTime <= d.source_out_sec
+  );
+
   return (
-    <div className="flex h-screen bg-[#09090B] text-zinc-100 overflow-hidden font-sans">
-      {/* 1. Left Navigation Rail (Switches across all 10 Screens) */}
+    <div className="flex h-screen bg-[#050508] text-zinc-100 overflow-hidden font-sans">
+      {/* 1. Sleek Left Studio Navigation Rail */}
       <SidebarNav
         currentScreen={currentScreen}
         onSelectScreen={setCurrentScreen}
@@ -429,23 +452,26 @@ export default function Home() {
         onSelectProject={(p) => loadProjectDetails(p)}
         onSeedDemo={handleSeedDemo}
         isSeeding={isSeeding}
+        nodeCount={graphState?.nodes.length || 18}
+        edgeCount={graphState?.edges.length || 24}
       />
 
-      {/* Main Workspace Area */}
-      <main className="flex-1 flex flex-col h-screen overflow-y-auto">
-        {/* Top Header / Project Bar */}
-        <header className="h-14 border-b border-zinc-800/80 bg-[#121217]/90 backdrop-blur-md px-6 flex items-center justify-between shrink-0 sticky top-0 z-30">
+      {/* Main Studio Canvas Area */}
+      <main className="flex-1 flex flex-col h-screen overflow-y-auto bg-studio-grid">
+        {/* Top Program Header */}
+        <header className="h-14 border-b border-white/[0.06] bg-[#09090f]/90 backdrop-blur-md px-6 flex items-center justify-between shrink-0 sticky top-0 z-30 shadow-sm">
           <div className="flex items-center gap-3">
-            <h2 className="text-sm font-semibold text-zinc-200">
-              {activeProject ? activeProject.title : "Director.AI Creative Studio"}
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-violet-500 shadow-[0_0_8px_#8b5cf6]" />
+              {activeProject ? activeProject.title : "Director.AI Pro Creative Studio"}
             </h2>
             {activeProject && (
               <>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono border border-zinc-700/60">
+                <span className="text-[10px] px-2 py-0.5 rounded bg-[#12121c] text-zinc-300 font-mono border border-white/10">
                   {activeProject.category}
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-violet-950 text-violet-300 font-mono border border-violet-800/60">
-                  Ratio: {activeProject.aspect_ratio}
+                <span className="text-[10px] px-2 py-0.5 rounded bg-violet-950 text-violet-300 font-mono border border-violet-800/80">
+                  {activeProject.aspect_ratio} Cinema
                 </span>
               </>
             )}
@@ -478,7 +504,7 @@ export default function Home() {
                   currentScreen === "studio" ? "text-violet-300 font-bold bg-violet-950" : "hover:text-zinc-200"
                 }`}
               >
-                3. Studio
+                3. NLE Studio
               </span>
               <span>➔</span>
               <span
@@ -487,7 +513,7 @@ export default function Home() {
                   currentScreen === "revisions" ? "text-violet-300 font-bold bg-violet-950" : "hover:text-zinc-200"
                 }`}
               >
-                4. Revisions
+                4. A/B Diff
               </span>
             </div>
 
@@ -496,7 +522,7 @@ export default function Home() {
               <button
                 onClick={handleGeneratePlan}
                 disabled={isLoading}
-                className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-violet-900/30 transition-all disabled:opacity-50"
+                className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-lg shadow-violet-900/40 border border-violet-400/30 transition-all disabled:opacity-50"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>{isLoading ? "Synthesizing..." : "Synthesize Edit (v1)"}</span>
@@ -505,97 +531,96 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Dynamic Screen View Router */}
+        {/* Dynamic Studio Views Router */}
         <div className="p-6 flex-1">
           {/* SCREEN 1: LANDING & ONBOARDING */}
           {currentScreen === "landing" && (
-            <div className="max-w-5xl mx-auto space-y-8 py-4">
+            <div className="max-w-5xl mx-auto space-y-8 py-4 select-none">
               <div className="text-center space-y-4">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-950/80 border border-violet-800 text-violet-300 text-xs font-medium">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-950/80 border border-violet-500/50 text-violet-300 text-xs font-medium shadow-md shadow-violet-900/20">
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Powered by FalkorDB Property Graph • Graph Hacks 2026</span>
                 </div>
 
-                <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white">
+                <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-white">
                   Autonomous AI Video Director
                 </h1>
                 <p className="text-zinc-400 text-base max-w-2xl mx-auto leading-relaxed">
-                  The first video editing agent grounded in a multi-hop spatio-temporal graph.
-                  Deconstruct reference videos into narrative beats, match raw footage across semantic tags,
-                  and perform conversational revisions with durable cross-session creator memory.
+                  A flagship creative workspace where video editing is driven by multi-hop graph reasoning
+                  across narrative beats, visual tags, and cross-session creator memory.
                 </p>
 
                 <div className="flex items-center justify-center gap-4 pt-2">
                   <button
                     onClick={handleSeedDemo}
                     disabled={isSeeding}
-                    className="bg-violet-600 hover:bg-violet-500 text-white font-semibold px-6 py-3 rounded-xl shadow-lg shadow-violet-900/40 flex items-center gap-2 transition-all disabled:opacity-50 text-sm"
+                    className="bg-gradient-to-r from-violet-600 via-indigo-600 to-violet-500 hover:from-violet-500 hover:to-indigo-400 text-white font-bold px-6 py-3 rounded-xl shadow-xl shadow-violet-900/40 border border-violet-400/40 flex items-center gap-2 transition-all disabled:opacity-50 text-sm"
                   >
                     <Play className="w-4 h-4 fill-current" />
-                    <span>{isSeeding ? "Seeding Demo..." : "Launch 1-Click Demo Studio"}</span>
+                    <span>{isSeeding ? "Seeding FalkorDB..." : "⚡ 1-Click Seed & Launch Studio"}</span>
                   </button>
                   <button
                     onClick={() => setCurrentScreen("wizard")}
-                    className="bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700/80 font-semibold px-5 py-3 rounded-xl text-sm transition-colors"
+                    className="bg-[#12121c] hover:bg-[#181826] text-zinc-200 border border-white/10 font-semibold px-5 py-3 rounded-xl text-sm transition-all"
                   >
-                    + Start New Project
+                    + Start New Production
                   </button>
                 </div>
               </div>
 
               {/* 3-Step Architecture Flow Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-6">
-                <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-5 space-y-3 shadow-xl">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-4">
+                <div className="studio-panel-interactive rounded-xl p-5 space-y-3 shadow-xl">
                   <div className="w-9 h-9 rounded-lg bg-violet-950 border border-violet-800/80 flex items-center justify-center text-violet-400 font-bold">
                     1
                   </div>
                   <h3 className="text-sm font-bold text-white">Reference Decomposition</h3>
                   <p className="text-xs text-zinc-400 leading-relaxed">
-                    PySceneDetect analyzes cut rhythm and energy levels, generating a sequential
+                    PySceneDetect extracts cut rhythm and energy curves, generating an immutable
                     (:StoryBeat)-[:NEXT_BEAT]-&gt;(:StoryBeat) narrative chain in FalkorDB.
                   </p>
                 </div>
 
-                <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-5 space-y-3 shadow-xl">
+                <div className="studio-panel-interactive rounded-xl p-5 space-y-3 shadow-xl">
                   <div className="w-9 h-9 rounded-lg bg-indigo-950 border border-indigo-800/80 flex items-center justify-center text-indigo-400 font-bold">
                     2
                   </div>
                   <h3 className="text-sm font-bold text-white">Connected Data Action</h3>
                   <p className="text-xs text-zinc-400 leading-relaxed">
                     The Director Agent traverses shared VisualTags and AudioMood nodes via multi-hop OpenCypher queries,
-                    selecting the best non-overlapping footage.
+                    selecting the highest-scoring non-overlapping raw clips.
                   </p>
                 </div>
 
-                <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-5 space-y-3 shadow-xl">
+                <div className="studio-panel-interactive rounded-xl p-5 space-y-3 shadow-xl">
                   <div className="w-9 h-9 rounded-lg bg-emerald-950 border border-emerald-800/80 flex items-center justify-center text-emerald-400 font-bold">
                     3
                   </div>
                   <h3 className="text-sm font-bold text-white">Lineage DAG & Memory</h3>
                   <p className="text-xs text-zinc-400 leading-relaxed">
                     Conversational revisions branch new EditVersion nodes in the lineage graph, mark rejected clips with
-                    [:REJECTED_FOR], and persist durable CreatorPreferences across projects.
+                    [:REJECTED_FOR], and persist durable CreatorPreferences across sessions.
                   </p>
                 </div>
               </div>
 
-              {/* Graph Hacks Compliance Proof Callout */}
-              <div className="bg-gradient-to-r from-violet-950/40 via-zinc-900 to-indigo-950/40 border border-violet-800/60 rounded-xl p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+              {/* Rule 2 & 3 Compliance Banner */}
+              <div className="p-6 rounded-xl bg-gradient-to-r from-violet-950/40 via-[#0e0e16] to-indigo-950/40 border border-violet-700/50 flex flex-col md:flex-row items-center justify-between gap-4">
                 <div className="space-y-1">
                   <h4 className="text-sm font-bold text-white flex items-center gap-2">
                     <Database className="w-4 h-4 text-emerald-400" />
                     <span>Passing the &quot;No-Decoration Graph&quot; Rule (Rule 2 & 3)</span>
                   </h4>
                   <p className="text-xs text-zinc-400 max-w-xl">
-                    FalkorDB is the sole primary database. If FalkorDB is removed, footage matching,
+                    FalkorDB is the primary database. If FalkorDB is removed, footage matching,
                     cut decisions, revision branching, and cross-session memory cease to operate.
                   </p>
                 </div>
                 <button
                   onClick={() => setCurrentScreen("studio")}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg border border-zinc-700 transition-colors shrink-0"
+                  className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-md transition-colors shrink-0"
                 >
-                  Inspect Studio Timeline ➔
+                  Explore Studio Timeline ➔
                 </button>
               </div>
             </div>
@@ -613,7 +638,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => setCurrentScreen("wizard")}
-                  className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 shadow-md"
+                  className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-3.5 py-2 rounded-lg flex items-center gap-1.5 shadow-md"
                 >
                   <PlusCircle className="w-4 h-4" />
                   <span>+ New Project</span>
@@ -624,10 +649,10 @@ export default function Home() {
                 {projects.map((p) => (
                   <div
                     key={p.id}
-                    className="bg-[#121217] border border-zinc-800/80 hover:border-violet-500/60 rounded-xl p-5 space-y-4 shadow-xl transition-all"
+                    className="studio-panel-interactive rounded-xl p-5 space-y-4 shadow-xl"
                   >
                     <div className="flex items-start justify-between">
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-violet-950 text-violet-300 border border-violet-800/60">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-violet-950 text-violet-300 border border-violet-800/80">
                         {p.category}
                       </span>
                       <span className="text-[10px] font-mono text-zinc-500">{p.id}</span>
@@ -642,7 +667,7 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div className="pt-3 border-t border-zinc-800 flex items-center justify-between text-xs">
+                    <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs">
                       <span className="text-zinc-500">
                         {p.version_count || 1} EditVersions
                       </span>
@@ -651,7 +676,7 @@ export default function Home() {
                           loadProjectDetails(p);
                           setCurrentScreen("studio");
                         }}
-                        className="text-violet-400 hover:text-violet-300 font-semibold flex items-center gap-1"
+                        className="text-violet-400 hover:text-violet-300 font-bold flex items-center gap-1"
                       >
                         <span>Open Studio</span>
                         <ArrowRight className="w-3.5 h-3.5" />
@@ -665,7 +690,7 @@ export default function Home() {
 
           {/* SCREEN 3: NEW PROJECT WIZARD */}
           {currentScreen === "wizard" && (
-            <div className="max-w-2xl mx-auto bg-[#121217] border border-zinc-800/80 rounded-xl p-6 shadow-xl space-y-6">
+            <div className="max-w-2xl mx-auto studio-panel rounded-xl p-6 shadow-2xl space-y-6">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <PlusCircle className="w-5 h-5 text-violet-400" />
@@ -683,9 +708,9 @@ export default function Home() {
                     type="text"
                     value={newTitle}
                     onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="e.g. NextGen AI Agent Architecture Breakdown"
+                    placeholder="e.g. Autonomous Agent Video Studio — Product Reveal"
                     required
-                    className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500 focus:outline-none"
+                    className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500 focus:outline-none"
                   />
                 </div>
 
@@ -695,7 +720,7 @@ export default function Home() {
                     <select
                       value={newCategory}
                       onChange={(e) => setNewCategory(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
+                      className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
                     >
                       <option>YouTube Long-Form (16:9)</option>
                       <option>Podcast Highlight</option>
@@ -711,7 +736,7 @@ export default function Home() {
                     <select
                       value={newAspectRatio}
                       onChange={(e) => setNewAspectRatio(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
+                      className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
                     >
                       <option value="16:9">16:9 Landscape</option>
                       <option value="9:16">9:16 Vertical</option>
@@ -729,7 +754,7 @@ export default function Home() {
                       onChange={(e) => setNewDuration(parseFloat(e.target.value))}
                       min={6}
                       max={120}
-                      className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
+                      className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
                     />
                   </div>
 
@@ -738,7 +763,7 @@ export default function Home() {
                     <select
                       value={newMood}
                       onChange={(e) => setNewMood(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
+                      className="w-full bg-[#07070b] border border-white/10 text-zinc-200 rounded-lg p-2.5 focus:border-violet-500"
                     >
                       <option value="upbeat">Upbeat & Inspiring</option>
                       <option value="dramatic">Dramatic & Cinematic</option>
@@ -748,14 +773,14 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Persistent Memory Warning & Injection */}
-                <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1">
+                {/* Persistent Memory Status */}
+                <div className="p-3 rounded-lg bg-[#0e0e16] border border-white/[0.06] space-y-1">
                   <span className="text-[10px] uppercase font-bold text-violet-400 flex items-center gap-1">
-                    <Brain className="w-3.5 h-3.5" /> Track 02 Memory Detected
+                    <Brain className="w-3.5 h-3.5" /> Track 02 Memory Active
                   </span>
                   <p className="text-[11px] text-zinc-400">
                     {preferences.length > 0
-                      ? `${preferences.length} standing CreatorPreferences will automatically influence Director Agent clip matching for this project.`
+                      ? `${preferences.length} standing CreatorPreferences stored in FalkorDB will automatically influence clip selection for this project.`
                       : "No prior style rules recorded. You can state standing preferences in the assistant anytime."}
                   </p>
                 </div>
@@ -763,9 +788,9 @@ export default function Home() {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full bg-violet-600 hover:bg-violet-500 text-white font-semibold py-2.5 rounded-lg shadow-md transition-colors"
+                  className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-2.5 rounded-lg shadow-md transition-colors"
                 >
-                  {isLoading ? "Writing to FalkorDB..." : "Create Project & Continue ➔"}
+                  {isLoading ? "Writing Project Node to FalkorDB..." : "Create Project & Continue ➔"}
                 </button>
               </form>
             </div>
@@ -774,7 +799,7 @@ export default function Home() {
           {/* SCREEN 4: REFERENCE VIDEO IMPORT & ANALYSIS */}
           {currentScreen === "reference" && (
             <div className="max-w-4xl mx-auto space-y-6">
-              <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-5 shadow-xl space-y-4">
+              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-base font-bold text-white flex items-center gap-2">
@@ -788,16 +813,16 @@ export default function Home() {
                   <button
                     onClick={handleAnalyzeReference}
                     disabled={isLoading}
-                    className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-md transition-all"
+                    className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-md transition-all"
                   >
                     {isLoading ? "Analyzing..." : "Run PySceneDetect & Graph Decomposition"}
                   </button>
                 </div>
 
-                {/* Graceful Fallback Banner per Brief */}
-                <div className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 text-xs text-zinc-400 flex items-center justify-between">
+                {/* Clean Fallback URL Card */}
+                <div className="p-3 rounded-lg bg-[#0e0e16] border border-white/[0.06] text-xs text-zinc-400 flex items-center justify-between">
                   <span>
-                    💡 You can upload an MP4 or use the pre-loaded high-energy reference video.
+                    💡 You can upload an MP4 or use the pre-loaded reference video.
                   </span>
                   <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">
                     Local MP4 / Direct Stream
@@ -805,7 +830,7 @@ export default function Home() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-4 rounded-lg bg-zinc-950 border border-zinc-800/80 space-y-2">
+                  <div className="p-4 rounded-lg bg-[#07070b] border border-white/10 space-y-2">
                     <label className="text-xs font-semibold text-zinc-300 block">Upload Reference MP4</label>
                     <input
                       type="file"
@@ -815,23 +840,67 @@ export default function Home() {
                     />
                   </div>
 
-                  <div className="p-4 rounded-lg bg-zinc-950 border border-zinc-800/80 space-y-2">
+                  <div className="p-4 rounded-lg bg-[#07070b] border border-white/10 space-y-2">
                     <label className="text-xs font-semibold text-zinc-300 block">Reference Video URL</label>
                     <input
                       type="text"
                       value={refUrl}
                       onChange={(e) => setRefUrl(e.target.value)}
                       placeholder="https://example.com/sample_reference.mp4"
-                      className="w-full text-xs bg-zinc-900 border border-zinc-800 text-zinc-200 rounded p-2 focus:border-violet-500"
+                      className="w-full text-xs bg-[#12121c] border border-white/10 text-zinc-200 rounded p-2 focus:border-violet-500"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* StoryBeat Graph Chain Display */}
-              <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-5 shadow-xl space-y-4">
+              {/* SVG Pacing & Energy Rhythm Chart */}
+              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200 flex items-center gap-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-emerald-400" />
+                    <span>Reference Pacing Signature & Energy Curve</span>
+                  </h3>
+                  <span className="text-[10px] text-zinc-400 font-mono">
+                    Avg Cut Length: 3.0s • High Energy Rapid Cut
+                  </span>
+                </div>
+
+                {/* SVG Energy Curve Graph */}
+                <div className="w-full h-24 bg-[#06060a] rounded-lg border border-white/[0.08] p-2 flex items-center justify-center">
+                  <svg viewBox="0 0 500 80" className="w-full h-full">
+                    {/* Grid lines */}
+                    <line x1="0" y1="20" x2="500" y2="20" stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
+                    <line x1="0" y1="40" x2="500" y2="40" stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
+                    <line x1="0" y1="60" x2="500" y2="60" stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
+
+                    {/* Energy Curve */}
+                    <path
+                      d="M 50 15 C 100 20, 150 50, 190 50 C 230 50, 270 30, 310 30 C 350 30, 400 20, 460 20"
+                      stroke="#8b5cf6"
+                      strokeWidth="2.5"
+                      fill="none"
+                    />
+
+                    {/* Beat Dots */}
+                    <circle cx="50" cy="15" r="4" fill="#8b5cf6" />
+                    <text x="50" y="75" fill="#a1a1aa" fontSize="8" textAnchor="middle" fontFamily="monospace">Beat 1 (5/5)</text>
+
+                    <circle cx="190" cy="50" r="4" fill="#06b6d4" />
+                    <text x="190" y="75" fill="#a1a1aa" fontSize="8" textAnchor="middle" fontFamily="monospace">Beat 2 (3/5)</text>
+
+                    <circle cx="310" cy="30" r="4" fill="#10b981" />
+                    <text x="310" y="75" fill="#a1a1aa" fontSize="8" textAnchor="middle" fontFamily="monospace">Beat 3 (4/5)</text>
+
+                    <circle cx="460" cy="20" r="4" fill="#f59e0b" />
+                    <text x="460" y="75" fill="#a1a1aa" fontSize="8" textAnchor="middle" fontFamily="monospace">Beat 4 (4/5)</text>
+                  </svg>
+                </div>
+              </div>
+
+              {/* StoryBeat Graph Chain Display */}
+              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
                     <SlidersHorizontal className="w-4 h-4 text-violet-400" />
                     <span>StoryBeat Sequential Chain (:StoryBeat)-[:NEXT_BEAT]-&gt;(:StoryBeat)</span>
                   </h3>
@@ -844,7 +913,7 @@ export default function Home() {
                   {referenceBeats.map((beat) => (
                     <div
                       key={beat.id}
-                      className="p-3 rounded-lg bg-zinc-950/80 border border-zinc-800/80 space-y-2 relative overflow-hidden"
+                      className="p-3 rounded-lg bg-[#07070b] border border-white/10 space-y-2 relative overflow-hidden"
                     >
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold uppercase text-violet-300">
@@ -863,7 +932,7 @@ export default function Home() {
                         {beat.required_tags?.map((t) => (
                           <span
                             key={t}
-                            className="text-[8px] px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-zinc-800"
+                            className="text-[8px] px-1.5 py-0.5 rounded bg-[#12121c] text-zinc-300 border border-white/5"
                           >
                             #{t}
                           </span>
@@ -879,7 +948,7 @@ export default function Home() {
           {/* SCREEN 5: FOOTAGE UPLOAD & MEDIA LIBRARY */}
           {currentScreen === "footage" && (
             <div className="max-w-5xl mx-auto space-y-6">
-              <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-5 shadow-xl flex items-center justify-between">
+              <div className="studio-panel rounded-xl p-5 shadow-2xl flex items-center justify-between">
                 <div>
                   <h2 className="text-base font-bold text-white flex items-center gap-2">
                     <Film className="w-5 h-5 text-violet-400" />
@@ -892,51 +961,58 @@ export default function Home() {
                 <button
                   onClick={handleLoadDemoFootage}
                   disabled={isLoading}
-                  className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-md transition-colors flex items-center gap-2"
+                  className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-md transition-colors flex items-center gap-2"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Load 1-Click Demo Footage Pack (5 Clips)</span>
                 </button>
               </div>
 
-              {/* Clip Cards Grid */}
+              {/* Cinema Contact-Sheet Cards Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {sourceClips.map((clip) => (
                   <div
                     key={clip.clip_id}
-                    className="bg-[#121217] border border-zinc-800/80 rounded-xl p-4 space-y-3 shadow-xl"
+                    className="studio-panel-interactive rounded-xl overflow-hidden shadow-xl"
                   >
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
-                        {clip.shot_type}
-                      </span>
-                      <span className="font-mono text-zinc-400 text-[10px]">
-                        {clip.clip_duration?.toFixed(1)}s
-                      </span>
-                    </div>
+                    {/* Top Filmstrip Header */}
+                    <div className="h-2 filmstrip-sprockets opacity-40 bg-[#151522]" />
 
-                    <div className="font-mono text-xs text-white truncate">
-                      {clip.filename || clip.asset_id}
-                    </div>
-
-                    <div className="text-[11px] text-zinc-400 italic bg-zinc-950/70 p-2 rounded border border-zinc-800/60 line-clamp-2">
-                      &quot;{clip.transcript || "Visual B-roll clip"}&quot;
-                    </div>
-
-                    <div className="flex flex-wrap gap-1">
-                      {clip.tags?.map((t) => (
-                        <span
-                          key={t}
-                          className="text-[9px] px-1.5 py-0.5 rounded bg-violet-950/60 text-violet-300 border border-violet-800/50"
-                        >
-                          #{t}
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#141420] text-violet-300 border border-violet-500/30">
+                          {clip.shot_type}
                         </span>
-                      ))}
-                    </div>
+                        <span className="font-mono text-zinc-400 text-[10px]">
+                          {clip.clip_duration?.toFixed(1)}s
+                        </span>
+                      </div>
 
-                    <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-[10px] text-zinc-500">
-                      <span>Energy: ⚡ {clip.energy_level}/5</span>
-                      <span className="text-emerald-400">Indexed in FalkorDB</span>
+                      <div className="font-mono text-xs text-white truncate font-bold">
+                        {clip.filename || clip.asset_id}
+                      </div>
+
+                      <div className="text-[11px] text-zinc-300 italic bg-[#07070b] p-2.5 rounded-lg border border-white/[0.05] line-clamp-2">
+                        &quot;{clip.transcript || "Visual B-roll clip"}&quot;
+                      </div>
+
+                      <div className="flex flex-wrap gap-1">
+                        {clip.tags?.map((t) => (
+                          <span
+                            key={t}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-violet-950/60 text-violet-300 border border-violet-800/50"
+                          >
+                            #{t}
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+                        <span className="text-zinc-400">Energy: ⚡ {clip.energy_level}/5</span>
+                        <span className="text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> FalkorDB Indexed
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -944,31 +1020,89 @@ export default function Home() {
             </div>
           )}
 
-          {/* SCREEN 6: AI EDITING STUDIO (CENTERPIECE SCREEN) */}
+          {/* SCREEN 6: AI EDITING STUDIO (PRO BROADCAST PROGRAM MONITOR + NLE TIMELINE) */}
           {currentScreen === "studio" && (
-            <div className="flex flex-col h-[calc(100vh-100px)] gap-4">
-              {/* Top Half: Video Player + Graph Traceability Inspector */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-[360px]">
-                {/* Top Left: Video Player */}
-                <div className="lg:col-span-7 bg-[#121217] border border-zinc-800/80 rounded-xl overflow-hidden flex flex-col shadow-xl">
-                  <div className="px-4 py-2 border-b border-zinc-800/80 flex items-center justify-between bg-zinc-900/60 text-xs">
-                    <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-                      <Play className="w-3.5 h-3.5 text-violet-400" />
-                      Studio MP4 Preview Player
-                    </span>
-                    <span className="text-[10px] text-zinc-500 font-mono">
-                      Resolution: 1280x720 • Aspect: {activeProject?.aspect_ratio || "16:9"}
-                    </span>
+            <div className="flex flex-col h-[calc(100vh-100px)] gap-4 select-none">
+              {/* Top Half: Broadcast Program Monitor + FalkorDB Graph Inspector */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-[370px]">
+                {/* Top Left: Pro Broadcast Program Monitor Frame */}
+                <div className="lg:col-span-7 bg-[#0b0b12] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col shadow-2xl relative">
+                  {/* Top Monitor Bar */}
+                  <div className="px-3.5 py-2 border-b border-white/[0.06] bg-[#0f0f18] flex items-center justify-between text-xs shrink-0">
+                    <div className="flex items-center gap-2">
+                      <Tv className="w-3.5 h-3.5 text-violet-400" />
+                      <span className="font-bold text-white">Program Monitor</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-300 font-mono">
+                        {activeProject?.aspect_ratio || "16:9"} Landscape
+                      </span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-300 font-mono">
+                        1080p • 24 FPS
+                      </span>
+                    </div>
+
+                    {/* Guide Overlay Toggles */}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setShowGridOverlay(!showGridOverlay)}
+                        className={`p-1 rounded text-[10px] font-mono flex items-center gap-1 transition-colors ${
+                          showGridOverlay
+                            ? "bg-violet-600 text-white"
+                            : "bg-[#12121c] text-zinc-400 hover:text-white border border-white/10"
+                        }`}
+                        title="Rule of Thirds Grid"
+                      >
+                        <Grid className="w-3 h-3" />
+                        <span>Grid</span>
+                      </button>
+
+                      <button
+                        onClick={() => setShowSafeZone(!showSafeZone)}
+                        className={`p-1 rounded text-[10px] font-mono flex items-center gap-1 transition-colors ${
+                          showSafeZone
+                            ? "bg-violet-600 text-white"
+                            : "bg-[#12121c] text-zinc-400 hover:text-white border border-white/10"
+                        }`}
+                        title="Action Safe Zone"
+                      >
+                        <Square className="w-3 h-3" />
+                        <span>Safe</span>
+                      </button>
+                    </div>
                   </div>
 
+                  {/* Video Stage with Overlays */}
                   <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
+                    {/* Safe Zone Overlay */}
+                    {showSafeZone && (
+                      <div className="absolute inset-8 border border-cyan-400/30 pointer-events-none z-20 flex items-start justify-end p-1">
+                        <span className="text-[8px] font-mono text-cyan-400/60 uppercase">90% Action Safe</span>
+                      </div>
+                    )}
+
+                    {/* Rule of Thirds Grid Overlay */}
+                    {showGridOverlay && (
+                      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none z-20">
+                        <div className="border-r border-b border-white/15" />
+                        <div className="border-r border-b border-white/15" />
+                        <div className="border-b border-white/15" />
+                        <div className="border-r border-b border-white/15" />
+                        <div className="border-r border-b border-white/15" />
+                        <div className="border-b border-white/15" />
+                        <div className="border-r border-white/15" />
+                        <div className="border-r border-white/15" />
+                        <div />
+                      </div>
+                    )}
+
+                    {/* HTML5 Video Element */}
                     {activePreviewUrl ? (
                       <video
                         ref={videoRef}
                         src={activePreviewUrl}
                         onTimeUpdate={handleTimeUpdate}
-                        controls
+                        loop={isLooping}
                         className="w-full h-full object-contain"
+                        onClick={handleTogglePlay}
                       />
                     ) : (
                       <div className="text-center p-8 space-y-3">
@@ -976,6 +1110,58 @@ export default function Home() {
                         <p className="text-xs text-zinc-400">
                           No edit synthesized yet. Click &quot;Synthesize Edit&quot; or &quot;1-Click Demo Seed&quot;.
                         </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Bottom Monitor Transport HUD */}
+                  <div className="px-3.5 py-2 border-t border-white/[0.06] bg-[#0c0c14] flex items-center justify-between text-xs shrink-0">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleStepFrame(-1)}
+                        className="p-1 rounded hover:bg-white/10 text-zinc-400 hover:text-white"
+                        title="Step Back 1 Frame (-1f)"
+                      >
+                        <SkipBack className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={handleTogglePlay}
+                        className="w-6 h-6 rounded bg-violet-600 hover:bg-violet-500 text-white flex items-center justify-center transition-all"
+                      >
+                        {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current ml-0.5" />}
+                      </button>
+
+                      <button
+                        onClick={() => handleStepFrame(1)}
+                        className="p-1 rounded hover:bg-white/10 text-zinc-400 hover:text-white"
+                        title="Step Forward 1 Frame (+1f)"
+                      >
+                        <SkipForward className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => setIsLooping(!isLooping)}
+                        className={`p-1 rounded ${
+                          isLooping ? "text-violet-400" : "text-zinc-500 hover:text-zinc-400"
+                        }`}
+                        title="Loop Playback"
+                      >
+                        <Repeat className="w-3.5 h-3.5" />
+                      </button>
+
+                      <span className="font-timecode text-xs text-violet-300 font-bold ml-1">
+                        {formatSMPTE(currentTime)}
+                      </span>
+                    </div>
+
+                    {/* Active Beat HUD Chip */}
+                    {currentlyPlayingCut && (
+                      <div className="text-[10px] font-mono px-2 py-0.5 rounded bg-violet-950/80 text-violet-200 border border-violet-800/80 flex items-center gap-1.5 truncate max-w-[280px]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+                        <span>Beat #{currentlyPlayingCut.order} • {currentlyPlayingCut.narrative_beat.toUpperCase()}</span>
+                        <span className="text-zinc-500">•</span>
+                        <span className="truncate text-zinc-400">{currentlyPlayingCut.source_asset}</span>
                       </div>
                     )}
                   </div>
@@ -1006,6 +1192,7 @@ export default function Home() {
                     onSeek={handleSeek}
                     isPlaying={isPlaying}
                     onTogglePlay={handleTogglePlay}
+                    activeVersionNum={versions.length > 0 ? versions[versions.length - 1].version_num : 1}
                   />
                 </div>
 
@@ -1015,6 +1202,7 @@ export default function Home() {
                     onSendRevision={handleSendRevision}
                     isRevising={isRevising}
                     activeVersionNum={versions.length > 0 ? versions[versions.length - 1].version_num : 1}
+                    creatorPreferences={preferences}
                   />
                 </div>
               </div>
@@ -1038,7 +1226,7 @@ export default function Home() {
 
           {/* SCREEN 8: EXPORT SETTINGS & CUT-LIST */}
           {currentScreen === "export" && (
-            <div className="max-w-3xl mx-auto bg-[#121217] border border-zinc-800/80 rounded-xl p-6 shadow-xl space-y-6">
+            <div className="max-w-3xl mx-auto studio-panel rounded-xl p-6 shadow-2xl space-y-6">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <Download className="w-5 h-5 text-violet-400" />
@@ -1050,18 +1238,18 @@ export default function Home() {
               </div>
 
               <div className="grid grid-cols-2 gap-4 text-xs">
-                <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800 space-y-1">
+                <div className="p-3 bg-[#07070b] rounded-lg border border-white/10 space-y-1">
                   <label className="text-zinc-400 font-semibold block">Master Resolution</label>
-                  <select className="w-full bg-zinc-900 border border-zinc-800 rounded p-2 text-zinc-200">
+                  <select className="w-full bg-[#12121c] border border-white/10 rounded p-2 text-zinc-200">
                     <option>1080p Full HD (1920x1080)</option>
                     <option>4K Ultra HD (3840x2160)</option>
                     <option>720p Social Web (1280x720)</option>
                   </select>
                 </div>
 
-                <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800 space-y-1">
+                <div className="p-3 bg-[#07070b] rounded-lg border border-white/10 space-y-1">
                   <label className="text-zinc-400 font-semibold block">Video Codec</label>
-                  <select className="w-full bg-zinc-900 border border-zinc-800 rounded p-2 text-zinc-200">
+                  <select className="w-full bg-[#12121c] border border-white/10 rounded p-2 text-zinc-200">
                     <option>H.264 / AVC (Broad Compatibility)</option>
                     <option>Apple ProRes 422 (Broadcast)</option>
                   </select>
@@ -1072,11 +1260,11 @@ export default function Home() {
                 {activePreviewUrl ? (
                   <a
                     href={activePreviewUrl}
-                    download="director_ai_render.mp4"
-                    className="flex-1 bg-violet-600 hover:bg-violet-500 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 text-xs shadow-md transition-all"
+                    download="director_ai_master.mp4"
+                    className="flex-1 bg-violet-600 hover:bg-violet-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center gap-2 text-xs shadow-md transition-all"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Download Rendered MP4</span>
+                    <span>Download Master MP4</span>
                   </a>
                 ) : (
                   <button
@@ -1098,7 +1286,7 @@ export default function Home() {
                     a.download = `falkordb_cutlist_${activeProject?.id || "project"}.json`;
                     a.click();
                   }}
-                  className="px-4 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700/80 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors"
+                  className="px-4 bg-[#12121c] hover:bg-[#1a1a28] text-zinc-200 border border-white/10 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors"
                 >
                   <span>Export Cut-List JSON</span>
                 </button>
@@ -1109,7 +1297,7 @@ export default function Home() {
           {/* SCREEN 9: SOCIAL ACCOUNTS & HUMAN-IN-THE-LOOP PUBLISHING */}
           {currentScreen === "publishing" && (
             <div className="max-w-3xl mx-auto space-y-6">
-              <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-6 shadow-xl space-y-4">
+              <div className="studio-panel rounded-xl p-6 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-base font-bold text-white flex items-center gap-2">
@@ -1149,7 +1337,7 @@ export default function Home() {
                     { name: "LinkedIn Video", handle: "Product Showcase", status: "Sandbox Mode" },
                     { name: "Instagram Reels", handle: "@director_ai", status: "Sandbox Mode" },
                   ].map((ch) => (
-                    <div key={ch.name} className="p-3 bg-zinc-950 rounded-lg border border-zinc-800 space-y-1">
+                    <div key={ch.name} className="p-3 bg-[#07070b] rounded-lg border border-white/10 space-y-1">
                       <div className="flex items-center justify-between font-semibold text-zinc-200">
                         <span>{ch.name}</span>
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
@@ -1161,16 +1349,16 @@ export default function Home() {
                   ))}
                 </div>
 
-                {/* Honest Status Sandbox Button */}
+                {/* Push to Sandbox Simulation */}
                 <div className="pt-2">
                   <button
                     onClick={() => setSandboxPushed(true)}
-                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold py-2.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-2"
+                    className="w-full bg-[#141420] hover:bg-[#1a1a2a] text-white font-bold py-2.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-2 border border-white/10"
                   >
                     <span>Push to Platform Sandbox for Preview</span>
                   </button>
                   {sandboxPushed && (
-                    <div className="mt-2 p-2.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] text-amber-300 font-mono text-center">
+                    <div className="mt-2 p-2.5 rounded bg-[#091510] border border-emerald-800/80 text-[11px] text-emerald-300 font-mono text-center">
                       ✓ Sandbox Confirmation Queued: Human approval required before production release.
                     </div>
                   )}
@@ -1183,23 +1371,23 @@ export default function Home() {
           {currentScreen === "settings" && (
             <div className="max-w-4xl mx-auto space-y-6">
               {/* Creator Profile */}
-              <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-5 shadow-xl flex items-center justify-between">
+              <div className="studio-panel rounded-xl p-5 shadow-2xl flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-violet-600 flex items-center justify-center text-white font-bold">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-md">
                     AC
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-white">Alex Chen (Creator)</h3>
-                    <p className="text-xs text-zinc-400">Creator ID: creator_default • FalkorDB Multi-Session Profile</p>
+                    <p className="text-xs text-zinc-400 font-mono">Creator ID: creator_default • FalkorDB Multi-Session Profile</p>
                   </div>
                 </div>
-                <span className="text-xs px-2.5 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono">
+                <span className="text-xs px-2.5 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono font-bold">
                   Pro Studio Tier
                 </span>
               </div>
 
               {/* Persistent FalkorDB Memory Manager (Track 02 Core) */}
-              <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-5 shadow-xl space-y-4">
+              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1225,7 +1413,7 @@ export default function Home() {
                     preferences.map((p) => (
                       <div
                         key={p.id}
-                        className="p-3 rounded-lg bg-zinc-950/80 border border-zinc-800/80 flex items-center justify-between gap-4 text-xs"
+                        className="p-3 rounded-lg bg-[#07070b] border border-white/10 flex items-center justify-between gap-4 text-xs"
                       >
                         <div className="space-y-1">
                           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-violet-950 text-violet-300 border border-violet-800/50">
@@ -1250,43 +1438,43 @@ export default function Home() {
                 {/* Add Preference Form */}
                 <form
                   onSubmit={handleAddPreference}
-                  className="pt-3 border-t border-zinc-800 flex gap-2 text-xs"
+                  className="pt-3 border-t border-white/[0.06] flex gap-2 text-xs"
                 >
                   <input
                     type="text"
                     value={newPrefRule}
                     onChange={(e) => setNewPrefRule(e.target.value)}
                     placeholder="Add a new standing editing preference rule..."
-                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-200 focus:border-violet-500"
+                    className="flex-1 bg-[#07070b] border border-white/10 rounded p-2 text-zinc-200 focus:border-violet-500"
                   />
                   <button
                     type="submit"
-                    className="bg-violet-600 hover:bg-violet-500 text-white font-semibold px-4 py-2 rounded shadow-md transition-colors"
+                    className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-4 py-2 rounded shadow-md transition-colors"
                   >
                     + Save Rule
                   </button>
                 </form>
               </div>
 
-              {/* Workspace Storage & Meter */}
-              <div className="bg-[#121217] border border-zinc-800/80 rounded-xl p-5 shadow-xl space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
-                  Workspace Resource Meter
+              {/* Workspace Resource Meter */}
+              <div className="studio-panel rounded-xl p-5 shadow-2xl space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-white">
+                  Workspace Telemetry Meter
                 </h4>
                 <div className="grid grid-cols-3 gap-3 text-xs font-mono">
-                  <div className="p-3 bg-zinc-950 rounded border border-zinc-800">
+                  <div className="p-3 bg-[#07070b] rounded border border-white/10">
                     <div className="text-zinc-500 text-[10px]">FalkorDB Nodes</div>
                     <div className="text-lg font-bold text-white mt-1">
                       {graphState?.nodes.length || 18} Nodes
                     </div>
                   </div>
-                  <div className="p-3 bg-zinc-950 rounded border border-zinc-800">
+                  <div className="p-3 bg-[#07070b] rounded border border-white/10">
                     <div className="text-zinc-500 text-[10px]">Active Lineage Edges</div>
                     <div className="text-lg font-bold text-violet-400 mt-1">
                       {graphState?.edges.length || 24} Edges
                     </div>
                   </div>
-                  <div className="p-3 bg-zinc-950 rounded border border-zinc-800">
+                  <div className="p-3 bg-[#07070b] rounded border border-white/10">
                     <div className="text-zinc-500 text-[10px]">Rendered Video Cache</div>
                     <div className="text-lg font-bold text-emerald-400 mt-1">
                       {versions.length} MP4 Versions

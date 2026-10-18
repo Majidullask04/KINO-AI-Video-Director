@@ -121,3 +121,11 @@ export interface VersionDiffItem {
   diff_status: "MODIFIED" | "UNCHANGED";
   v2_reason: string;
 }
+
+export function formatSMPTE(seconds: number, fps: number = 24): string {
+  const safeSec = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  const mins = Math.floor(safeSec / 60);
+  const secs = Math.floor(safeSec % 60);
+  const frames = Math.floor((safeSec % 1) * fps);
+  return `00:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
+}
