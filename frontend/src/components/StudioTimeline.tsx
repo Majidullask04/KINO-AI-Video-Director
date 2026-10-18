@@ -277,7 +277,8 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
 
           {/* TRACK V1: PRIMARY STORYLINE CUTS */}
           <div
-            className="h-16 border-b border-white/[0.04] p-1 flex gap-1 relative cursor-pointer"
+            className="h-16 border-b border-white/[0.04] p-1 relative cursor-pointer"
+            style={{ display: "flex", flexDirection: "row", gap: "6px", overflowX: "auto" }}
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const clickX = e.clientX - rect.left;

@@ -457,7 +457,7 @@ export default function Home() {
   );
 
   return (
-    <div className="flex h-screen bg-[#050508] text-zinc-100 overflow-hidden font-sans">
+    <div className="app-shell">
       {/* 1. Sleek Left Studio Navigation Rail */}
       <SidebarNav
         currentScreen={currentScreen}
@@ -472,82 +472,67 @@ export default function Home() {
       />
 
       {/* Main Studio Canvas Area */}
-      <main className="flex-1 flex flex-col h-screen overflow-y-auto bg-studio-grid">
+      <main className="main-workspace bg-studio-grid">
         {/* Top Program Header */}
-        <header className="h-14 border-b border-white/[0.06] bg-[#09090f]/90 backdrop-blur-md px-6 flex items-center justify-between shrink-0 sticky top-0 z-30 shadow-sm">
-          <div className="flex items-center gap-3">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-violet-500 shadow-[0_0_8px_#8b5cf6]" />
-              {activeProject ? activeProject.title : "Director.AI Pro Creative Studio"}
+        <header className="top-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: "60px", padding: "0 24px" }}>
+          <div className="flex items-center gap-3" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="w-2.5 h-2.5 rounded-full bg-violet-500 shadow-[0_0_8px_#8b5cf6]" />
+              <span>{activeProject ? activeProject.title : "Director.AI Pro Creative Studio"}</span>
             </h2>
             {activeProject && (
-              <>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-[#12121c] text-zinc-300 font-mono border border-white/10">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span className="badge-pill font-mono">
                   {activeProject.category}
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-violet-950 text-violet-300 font-mono border border-violet-800/80">
-                  {activeProject.aspect_ratio} Cinema
+                <span className="badge-pill font-mono text-violet-300">
+                  {activeProject.aspect_ratio}&nbsp;Cinema&nbsp;•&nbsp;1080p
                 </span>
-              </>
+              </div>
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             {/* Direct Workflow Stepper */}
-            <div className="hidden lg:flex items-center gap-1.5 text-xs text-zinc-400">
-              <span
-                onClick={() => setCurrentScreen("reference")}
-                className={`cursor-pointer px-2 py-1 rounded transition-colors ${
-                  currentScreen === "reference" ? "text-violet-300 font-bold bg-violet-950" : "hover:text-zinc-200"
-                }`}
-              >
-                1. Ref Beats
-              </span>
-              <span>➔</span>
-              <span
-                onClick={() => setCurrentScreen("footage")}
-                className={`cursor-pointer px-2 py-1 rounded transition-colors ${
-                  currentScreen === "footage" ? "text-violet-300 font-bold bg-violet-950" : "hover:text-zinc-200"
-                }`}
-              >
-                2. Footage
-              </span>
-              <span>➔</span>
-              <span
-                onClick={() => setCurrentScreen("studio")}
-                className={`cursor-pointer px-2 py-1 rounded transition-colors ${
-                  currentScreen === "studio" ? "text-violet-300 font-bold bg-violet-950" : "hover:text-zinc-200"
-                }`}
-              >
-                3. NLE Studio
-              </span>
-              <span>➔</span>
-              <span
-                onClick={() => setCurrentScreen("revisions")}
-                className={`cursor-pointer px-2 py-1 rounded transition-colors ${
-                  currentScreen === "revisions" ? "text-violet-300 font-bold bg-violet-950" : "hover:text-zinc-200"
-                }`}
-              >
-                4. A/B Diff
-              </span>
+            <div className="hidden lg:flex items-center gap-2 text-xs" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {[
+                { id: "reference", label: "1. Ref Beats" },
+                { id: "footage", label: "2. Media Bin" },
+                { id: "studio", label: "3. AI Studio" },
+                { id: "revisions", label: "4. Compare & Export" },
+              ].map((step, idx) => (
+                <React.Fragment key={step.id}>
+                  {idx > 0 && <span className="text-zinc-600">➔</span>}
+                  <button
+                    type="button"
+                    onClick={() => setCurrentScreen(step.id as ScreenId)}
+                    className={currentScreen === step.id ? "badge-pill text-violet-200 border-violet-500/50 bg-violet-950 font-bold" : "text-zinc-400 hover:text-zinc-200 border border-transparent"}
+                    style={{ cursor: "pointer", background: currentScreen === step.id ? "rgba(139, 92, 246, 0.2)" : "transparent", padding: "4px 10px", fontSize: "11px" }}
+                  >
+                    {step.label}
+                  </button>
+                </React.Fragment>
+              ))}
             </div>
 
             {/* Synthesize Edit Button */}
-            {activeProject && (
+            {activeProject ? (
               <button
+                type="button"
                 onClick={handleGeneratePlan}
                 disabled={isLoading}
-                className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-lg shadow-violet-900/40 border border-violet-400/30 transition-all disabled:opacity-50"
+                className="btn-primary"
+                style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{isLoading ? "Synthesizing..." : "Synthesize Edit (v1)"}</span>
+                <span>{isLoading ? "Synthesizing..." : "✨ Synthesize Edit"}</span>
               </button>
-            )}
+            ) : null}
           </div>
         </header>
 
         {/* Dynamic Studio Views Router */}
-        <div className="p-6 flex-1">
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflowY: currentScreen === "studio" ? "hidden" : "auto", padding: currentScreen === "studio" ? "0" : "28px", width: "100%" }}>
           {/* SCREEN 1: LANDING & ONBOARDING */}
           {currentScreen === "landing" && (
             <div className="max-w-5xl mx-auto space-y-8 py-4 select-none">
@@ -1367,11 +1352,13 @@ export default function Home() {
 
           {/* SCREEN 6: AI EDITING STUDIO (PRO BROADCAST PROGRAM MONITOR + NLE TIMELINE) */}
           {currentScreen === "studio" && (
-            <div className="flex flex-col h-[calc(100vh-100px)] gap-4 select-none">
-              {/* Top Half: Broadcast Program Monitor + FalkorDB Graph Inspector */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-[370px]">
-                {/* Top Left: Pro Broadcast Program Monitor Frame */}
-                <div className="lg:col-span-7 bg-[#0b0b12] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col shadow-2xl relative">
+            <div className="studio-body">
+              {/* Left/Center Column */}
+              <div className="studio-center-column">
+                {/* Top Stage */}
+                <div className="studio-stage">
+                  {/* Left Card: Program Video Monitor */}
+                  <div className="studio-card flex flex-col justify-between" style={{ display: "flex", flexDirection: "column", height: "100%", padding: "12px", overflow: "hidden" }}>
                   {/* Top Monitor Bar */}
                   <div className="px-3.5 py-2 border-b border-white/[0.06] bg-[#0f0f18] flex items-center justify-between text-xs shrink-0">
                     <div className="flex items-center gap-2">
@@ -1512,22 +1499,20 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Top Right: Graph Traceability & Cypher Inspector */}
-                <div className="lg:col-span-5 h-full">
-                  <GraphInspector
-                    selectedDecision={selectedDecision}
-                    graphState={graphState}
-                    onRefreshGraph={() => {
-                      if (activeProject) refreshGraphState(activeProject.id);
-                    }}
-                  />
+                {/* Right Card: GraphInspector */}
+                  <div className="studio-card" style={{ height: "100%", padding: "0", overflow: "hidden" }}>
+                    <GraphInspector
+                      selectedDecision={selectedDecision}
+                      graphState={graphState}
+                      onRefreshGraph={() => {
+                        if (activeProject) refreshGraphState(activeProject.id);
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {/* Bottom Half: Multitrack Timeline + Revision Assistant Sidebar */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-64 shrink-0">
-                {/* Timeline */}
-                <div className="lg:col-span-8 h-full">
+                {/* Bottom Dock: Multitrack Timeline */}
+                <div className="studio-timeline-dock">
                   <StudioTimeline
                     decisions={decisions}
                     selectedDecisionId={selectedDecision?.decision_id || null}
@@ -1540,16 +1525,16 @@ export default function Home() {
                     activeVersionNum={versions.length > 0 ? versions[versions.length - 1].version_num : 1}
                   />
                 </div>
+              </div>
 
-                {/* Assistant Sidebar */}
-                <div className="lg:col-span-4 h-full">
-                  <DirectorChat
-                    onSendRevision={handleSendRevision}
-                    isRevising={isRevising}
-                    activeVersionNum={versions.length > 0 ? versions[versions.length - 1].version_num : 1}
-                    creatorPreferences={preferences}
-                  />
-                </div>
+              {/* Right Column: AI Director Chat */}
+              <div className="studio-chat-sidebar">
+                <DirectorChat
+                  onSendRevision={handleSendRevision}
+                  isRevising={isRevising}
+                  activeVersionNum={versions.length > 0 ? versions[versions.length - 1].version_num : 1}
+                  creatorPreferences={preferences}
+                />
               </div>
             </div>
           )}

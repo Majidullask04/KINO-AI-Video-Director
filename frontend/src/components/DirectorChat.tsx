@@ -34,10 +34,9 @@ interface DirectorChatProps {
 }
 
 const QUICK_PROMPTS = [
-  "⚡ Swap Beat 2 for higher-energy B-roll",
-  "✂️ Trim opening hook to 2.0s & remember I like fast hooks",
-  "🎬 Replace product demo clip with close-up code shot",
-  "🔥 Make setup beat faster and dynamic",
+  "Swap clip 2 for higher-energy B-roll",
+  "Trim hook to 2.5s",
+  "Remember I prefer fast cuts",
 ];
 
 export const DirectorChat: React.FC<DirectorChatProps> = ({
@@ -236,7 +235,8 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
       {/* Input Form */}
       <form
         onSubmit={handleSubmit}
-        className="p-3 border-t border-white/[0.08] bg-[#0e0e16] flex items-center gap-2"
+        className="border-t border-white/[0.08] bg-[#0e0e16]"
+        style={{ display: "flex", gap: "8px", padding: "12px", alignItems: "center" }}
       >
         <input
           type="text"

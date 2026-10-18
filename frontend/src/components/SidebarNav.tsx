@@ -100,19 +100,19 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   edgeCount = 24,
 }) => {
   return (
-    <aside className="w-64 bg-[#08080d] border-r border-white/[0.07] flex flex-col justify-between h-screen select-none shrink-0 sticky top-0 z-40">
+    <aside className="sidebar-rail w-64 bg-[#08080d] border-r border-white/[0.07] flex flex-col justify-between h-screen select-none shrink-0 sticky top-0 z-40">
       {/* Brand & Project Selector */}
       <div>
-        <div className="p-4 border-b border-white/[0.06] bg-[#0c0c14]/80">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
+        <div className="p-3 border-b border-white/[0.06] bg-[#0c0c14]/80 rounded-xl mb-3">
+          <div className="flex items-center justify-between" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div className="flex items-center gap-2.5" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-600 via-indigo-600 to-violet-400 flex items-center justify-center shadow-lg shadow-violet-900/40 border border-violet-400/30">
                 <Sparkles className="w-4 h-4 text-white" />
               </div>
               <div>
-                <h1 className="text-sm font-bold tracking-tight text-white flex items-center gap-1.5">
-                  Director.AI
-                  <span className="text-[9px] uppercase font-mono font-extrabold px-1.5 py-0.2 rounded bg-violet-500/20 text-violet-300 border border-violet-500/40">
+                <h1 className="text-sm font-bold tracking-tight text-white flex items-center gap-1.5" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>Director.AI</span>
+                  <span className="badge-pill text-[9px] uppercase font-mono font-extrabold px-1.5 py-0.2">
                     Pro
                   </span>
                 </h1>
@@ -123,12 +123,12 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
 
           {/* Project Switcher */}
           <div className="mt-3.5">
-            <div className="flex items-center justify-between text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1">
-              <span className="flex items-center gap-1">
+            <div className="flex items-center justify-between text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span className="flex items-center gap-1" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                 <FolderGit2 className="w-3 h-3 text-violet-400" />
-                Active Project
+                <span>Active Project</span>
               </span>
-              <span className="font-mono text-zinc-400">{projects.length} Total</span>
+              <span className="font-mono text-zinc-400">&nbsp;{projects.length} Total</span>
             </div>
             <select
               value={activeProject?.id || ""}
@@ -136,7 +136,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                 const found = projects.find((p) => p.id === e.target.value);
                 if (found) onSelectProject(found);
               }}
-              className="w-full text-xs bg-[#12121c] border border-white/10 text-zinc-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 transition-all font-medium truncate"
+              className="w-full text-xs bg-[#12121c] border border-white/10 text-zinc-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-violet-500 font-medium truncate"
             >
               {projects.length === 0 ? (
                 <option value="">No projects loaded</option>
@@ -152,11 +152,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         </div>
 
         {/* 4 Studio Sections Navigation */}
-        <div className="px-2.5 py-3 space-y-4 overflow-y-auto max-h-[calc(100vh-320px)]">
+        <div className="space-y-4 overflow-y-auto max-h-[calc(100vh-340px)]">
           {SECTIONS.map((section) => (
-            <div key={section.title} className="space-y-0.5">
-              <div className="text-[9px] font-bold tracking-wider text-zinc-400 uppercase px-2.5 py-1 flex items-center justify-between">
-                <span>{section.title}</span>
+            <div key={section.title} className="nav-group space-y-0.5">
+              <div className="nav-group-title text-[9px] font-bold tracking-wider text-zinc-400 uppercase px-2 py-1">
+                {section.title}
               </div>
 
               {section.items.map((item) => {
@@ -166,48 +166,40 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                   <button
                     key={item.id}
                     onClick={() => onSelectScreen(item.id)}
-                    className={`w-full group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all relative ${
-                      isActive
-                        ? "bg-violet-500/15 text-violet-200 shadow-sm border border-violet-500/30 font-semibold"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04] border border-transparent"
-                    }`}
+                    className={isActive ? "nav-btn active" : "nav-btn"}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}
                   >
-                    {/* Active Left Indicator Bar */}
-                    {isActive && (
-                      <span className="absolute -left-2.5 top-1/2 -translate-y-1/2 w-1 h-5 bg-violet-500 rounded-r-full shadow-[0_0_12px_#8b5cf6]" />
-                    )}
-
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                       <Icon
                         className={`w-4 h-4 shrink-0 transition-colors ${
                           isActive
                             ? "text-violet-400"
-                            : "text-zinc-500 group-hover:text-zinc-300"
+                            : "text-zinc-500"
                         }`}
                       />
                       <span className="truncate">{item.label}</span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                       {item.isLive && (
                         <span className="flex items-center gap-1 px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] font-mono font-bold animate-pulse">
                           <Radio className="w-2.5 h-2.5" />
-                          LIVE
+                          <span>LIVE</span>
                         </span>
                       )}
                       {item.badge && !item.isLive && (
                         <span
-                          className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-medium ${
+                          className={`badge-pill text-[9px] px-1.5 py-0.2 font-mono font-medium ${
                             isActive
-                              ? "bg-violet-500/25 text-violet-200 border border-violet-500/40"
-                              : "bg-white/[0.05] text-zinc-400 border border-white/[0.05]"
+                              ? "bg-violet-500/25 text-violet-200 border-violet-500/40"
+                              : "bg-white/[0.05] text-zinc-400 border-white/[0.05]"
                           }`}
                         >
                           {item.badge}
                         </span>
                       )}
-                      <span className="text-[9px] font-mono text-zinc-400 group-hover:text-zinc-400 hidden lg:inline-block">
-                        {item.shortcut}
+                      <span className="text-[9px] font-mono text-zinc-400 hidden lg:inline-block">
+                        &nbsp;{item.shortcut}
                       </span>
                     </div>
                   </button>
@@ -219,27 +211,28 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       </div>
 
       {/* Footer Telemetry & 1-Click Action */}
-      <div className="p-3 border-t border-white/[0.06] space-y-2.5 bg-[#0a0a10]">
+      <div className="pt-3 border-t border-white/[0.06] space-y-2.5 bg-[#0a0a10]">
         {/* 1-Click Demo Seed Button */}
         <button
           onClick={onSeedDemo}
           disabled={isSeeding}
-          className="w-full bg-gradient-to-r from-violet-600 via-indigo-600 to-violet-500 hover:from-violet-500 hover:to-indigo-400 text-white text-xs font-bold py-2.5 px-3 rounded-lg shadow-lg shadow-violet-900/30 border border-violet-400/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+          className="btn-primary w-full text-xs font-bold py-2.5 px-3 rounded-lg flex items-center justify-center gap-2"
+          style={{ width: "100%" }}
         >
           <Zap className={`w-3.5 h-3.5 ${isSeeding ? "animate-spin" : "fill-current"}`} />
           <span>{isSeeding ? "Seeding FalkorDB..." : "⚡ 1-Click Demo Seed"}</span>
         </button>
 
         {/* FalkorDB Telemetry Card */}
-        <div className="p-2.5 rounded-lg bg-[#0e0e16] border border-white/[0.06] text-[11px] space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-1.5 text-zinc-300 font-medium">
+        <div className="studio-card p-2.5 rounded-lg text-[11px] space-y-1.5">
+          <div className="flex items-center justify-between" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="flex items-center gap-1.5 text-zinc-300 font-medium" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <Database className="w-3.5 h-3.5 text-emerald-400" />
               <span>FalkorDB Engine</span>
             </span>
-            <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-mono font-semibold">
+            <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-mono font-semibold" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Connected
+              <span>Connected</span>
             </span>
           </div>
 
@@ -247,17 +240,23 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             redis://localhost:6379 • <span className="text-violet-400">ai_video_director</span>
           </div>
 
-          <div className="flex items-center justify-between text-[9px] font-mono text-zinc-400 pt-1 border-t border-white/[0.05]">
-            <span>Nodes: <strong className="text-zinc-200">{nodeCount}</strong></span>
-            <span>Edges: <strong className="text-violet-300">{edgeCount}</strong></span>
-            <span className="text-emerald-400">0.4ms</span>
+          <div
+            className="flex items-center justify-between text-[9px] font-mono text-zinc-400 pt-1 border-t border-white/[0.05]"
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" }}
+          >
+            <span>Nodes:&nbsp;<strong className="text-zinc-200">{nodeCount}</strong></span>
+            <span>Edges:&nbsp;<strong className="text-violet-300">{edgeCount}</strong></span>
+            <span className="text-emerald-400">&nbsp;0.4ms</span>
           </div>
         </div>
 
         {/* Track Claims Badge */}
-        <div className="text-[9px] text-zinc-400 border border-white/[0.06] rounded p-1.5 bg-[#08080e] flex items-center justify-between font-mono">
+        <div
+          className="text-[9px] text-zinc-400 border border-white/[0.06] rounded p-1.5 bg-[#08080e] flex items-center justify-between font-mono"
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+        >
           <span className="text-violet-400 font-bold">Track 01 & Track 02</span>
-          <span className="text-zinc-400">WeMakeDevs 2026</span>
+          <span className="text-zinc-400">&nbsp;WeMakeDevs 2026</span>
         </div>
       </div>
     </aside>
