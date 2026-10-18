@@ -67,7 +67,25 @@ import {
   Sparkles,
 } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://kino-ai-video-director.onrender.com";
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "https://kino-ai-video-director.onrender.com").replace(/\/+$/, "");
+const backendMediaUrl = (path: string) => {
+  if (!path) return "";
+
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      const url = new URL(path);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+        return `${API_BASE}${url.pathname}${url.search}${url.hash}`;
+      }
+      return path;
+    } catch {
+      return path;
+    }
+  }
+
+  return `${API_BASE}/${path.replace(/^\/+/, "")}`;
+};
+const DEMO_REFERENCE_VIDEO = backendMediaUrl("/static/samples/ref_high_energy_demo.mp4");
 
 export default function Home() {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>("studio");
@@ -204,7 +222,7 @@ export default function Home() {
         if (data.versions && data.versions.length > 0) {
           const latest = data.versions[data.versions.length - 1];
           if (latest.preview_url) {
-            setActivePreviewUrl(`${API_BASE}${latest.preview_url}`);
+            setActivePreviewUrl(backendMediaUrl(latest.preview_url));
           }
         }
       }
@@ -247,7 +265,7 @@ export default function Home() {
           }
         }
         if (data.version_v1?.preview_url) {
-          setActivePreviewUrl(`${API_BASE}${data.version_v1.preview_url}`);
+          setActivePreviewUrl(backendMediaUrl(data.version_v1.preview_url));
         }
         setCurrentScreen("studio");
       }
@@ -274,7 +292,7 @@ export default function Home() {
           setSelectedDecision(plan.traceability[0]);
         }
         if (plan.preview_url) {
-          setActivePreviewUrl(`${API_BASE}${plan.preview_url}`);
+          setActivePreviewUrl(backendMediaUrl(plan.preview_url));
         }
         await loadProjectDetails(activeProject);
       }
@@ -303,7 +321,7 @@ export default function Home() {
           setSelectedDecision(rev.traceability[0]);
         }
         if (rev.preview_url) {
-          setActivePreviewUrl(`${API_BASE}${rev.preview_url}`);
+          setActivePreviewUrl(backendMediaUrl(rev.preview_url));
         }
         if (rev.diff_summary) {
           setDiffItems(rev.diff_summary);
@@ -427,7 +445,7 @@ export default function Home() {
             setSelectedDecision(data.plan.traceability[0]);
           }
           if (data.plan.preview_url) {
-            setActivePreviewUrl(`${API_BASE}${data.plan.preview_url}`);
+            setActivePreviewUrl(backendMediaUrl(data.plan.preview_url));
           }
         }
 
@@ -476,7 +494,7 @@ export default function Home() {
             setSelectedDecision(data.plan.traceability[0]);
           }
           if (data.plan.preview_url) {
-            setActivePreviewUrl(`${API_BASE}${data.plan.preview_url}`);
+            setActivePreviewUrl(backendMediaUrl(data.plan.preview_url));
           }
         }
 
@@ -537,7 +555,7 @@ export default function Home() {
         const data = await res.json();
         await loadProjectDetails(targetProject);
         if (data.version?.preview_url) {
-          setActivePreviewUrl(`${API_BASE}${data.version.preview_url}`);
+          setActivePreviewUrl(backendMediaUrl(data.version.preview_url));
         }
         if (data.version?.traceability) {
           setDecisions(data.version.traceability);
@@ -958,7 +976,7 @@ export default function Home() {
                   >
                     <video
                       controls
-                      src={activePreviewUrl || "http://localhost:8000/static/samples/ref_high_energy_demo.mp4"}
+                      src={activePreviewUrl || DEMO_REFERENCE_VIDEO}
                       style={{ width: "100%", height: "100%", objectFit: "contain" }}
                     />
                   </div>
@@ -1180,7 +1198,7 @@ export default function Home() {
                           }}
                         >
                           <video
-                            src="http://localhost:8000/static/samples/ref_high_energy_demo.mp4#t=0.5"
+                            src={`${DEMO_REFERENCE_VIDEO}#t=0.5`}
                             muted
                             playsInline
                             loop
@@ -1545,7 +1563,7 @@ export default function Home() {
                   >
                     <video
                       controls
-                      src="http://localhost:8000/static/samples/ref_high_energy_demo.mp4"
+                      src={DEMO_REFERENCE_VIDEO}
                       style={{ width: "100%", height: "100%", objectFit: "contain" }}
                     />
                   </div>
@@ -2002,7 +2020,8 @@ export default function Home() {
                     return true;
                   })
                   .map((clip) => {
-                    const videoSrc = clip.video_url || (clip.filename ? (clip.filename.startsWith("http") ? clip.filename : `http://localhost:8000/static/${clip.filename.includes("upload") ? clip.filename : "samples/" + clip.filename}`) : "");
+                    const clipPath = clip.video_url || (clip.filename ? `/static/${clip.filename.includes("upload") ? clip.filename : `samples/${clip.filename}`}` : "");
+                    const videoSrc = clipPath ? backendMediaUrl(clipPath) : "";
                     return (
                       <div
                         key={clip.clip_id}
@@ -2254,7 +2273,7 @@ export default function Home() {
                           }}
                         >
                           <video
-                            src={`http://localhost:8000/static/${selectedClipFitAnalysis.filename.includes("upload") ? selectedClipFitAnalysis.filename : "samples/" + selectedClipFitAnalysis.filename}`}
+                            src={backendMediaUrl(`/static/${selectedClipFitAnalysis.filename.includes("upload") ? selectedClipFitAnalysis.filename : `samples/${selectedClipFitAnalysis.filename}`}`)}
                             controls
                             autoPlay
                             loop
@@ -2770,7 +2789,7 @@ export default function Home() {
                       {/* HTML5 Video Element */}
                       <video
                         ref={videoRef}
-                        src={activePreviewUrl || "http://localhost:8000/static/samples/ref_high_energy_demo.mp4"}
+                        src={activePreviewUrl || DEMO_REFERENCE_VIDEO}
                         onTimeUpdate={handleTimeUpdate}
                         loop={isLooping}
                         onClick={handleTogglePlay}
@@ -3020,7 +3039,7 @@ export default function Home() {
                   {/* Download Action */}
                   <div style={{ marginTop: "auto", paddingTop: "10px", display: "flex", gap: "10px" }}>
                     <a
-                      href={activePreviewUrl || "http://localhost:8000/static/samples/ref_high_energy_demo.mp4"}
+                      href={activePreviewUrl || DEMO_REFERENCE_VIDEO}
                       download={`${activeProject?.title || "director_ai"}_master.mp4`}
                       className="btn-primary"
                       style={{
@@ -3073,7 +3092,7 @@ export default function Home() {
                   >
                     <video
                       controls
-                      src={activePreviewUrl || "http://localhost:8000/static/samples/ref_high_energy_demo.mp4"}
+                      src={activePreviewUrl || DEMO_REFERENCE_VIDEO}
                       style={{ width: "100%", height: "100%", objectFit: "contain" }}
                     />
                   </div>

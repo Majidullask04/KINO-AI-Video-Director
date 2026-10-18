@@ -314,7 +314,7 @@ async def upload_footage(
                 }
                 fit_res = analyze_clip_beat_fit(project_id, clip_data)
                 clip["fit_analysis"] = fit_res
-                clip["video_url"] = f"http://localhost:8000/static/uploads/{f.filename}"
+                clip["video_url"] = f"/static/uploads/{f.filename}"
                 all_recommendations.append(fit_res)
 
             indexed_assets.append(idx_res)
@@ -343,7 +343,7 @@ async def upload_footage(
                 }
                 fit_res = analyze_clip_beat_fit(project_id, clip_data)
                 clip["fit_analysis"] = fit_res
-                clip["video_url"] = f"http://localhost:8000/static/samples/{sc}"
+                clip["video_url"] = f"/static/samples/{sc}"
                 all_recommendations.append(fit_res)
             indexed_assets.append(idx_res)
 
