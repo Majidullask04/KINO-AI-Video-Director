@@ -60,28 +60,30 @@ class VideoGraphDB:
             if self.url:
                 self._client = FalkorDB.from_url(self.url)
             else:
-                kwargs = {
+                base_kwargs = {
                     "host": self.host,
                     "port": self.port,
                 }
                 if self.password:
-                    kwargs["password"] = self.password
-                if self.username:
-                    kwargs["username"] = self.username
-                elif self.password:
-                    # FalkorDB Cloud on AWS uses Redis ACL with 'default' user
-                    kwargs["username"] = "default"
+                    base_kwargs["password"] = self.password
                 if self.ssl:
-                    kwargs["ssl"] = True
-                try:
-                    self._client = FalkorDB(**kwargs)
-                except Exception as e:
-                    # If 'default' failed or wasn't accepted, try without explicit username
-                    if kwargs.get("username") == "default":
-                        kwargs.pop("username", None)
-                        self._client = FalkorDB(**kwargs)
-                    else:
-                        raise e
+                    base_kwargs["ssl"] = True
+
+                candidates = [self.username] if self.username else (["falkordb", "default", None] if self.password else [None])
+                last_err = None
+                for u in candidates:
+                    attempt_kwargs = dict(base_kwargs)
+                    if u:
+                        attempt_kwargs["username"] = u
+                    try:
+                        self._client = FalkorDB(**attempt_kwargs)
+                        break
+                    except Exception as e:
+                        last_err = e
+                        self._client = None
+                        continue
+                if self._client is None and last_err:
+                    raise last_err
         return self._client
 
     @property
