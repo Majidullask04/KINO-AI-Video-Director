@@ -26,7 +26,13 @@ class VideoGraphDB:
         self.port = int(os.getenv("FALKORDB_PORT", 6379))
         self.password = os.getenv("FALKORDB_PASSWORD", None)
         self.graph_name = os.getenv("FALKORDB_GRAPH_NAME", "ai_video_director")
-        self.client = FalkorDB(host=self.host, port=self.port, password=self.password)
+        self.url = os.getenv("FALKORDB_URL") or os.getenv("REDIS_URL")
+        
+        if self.url:
+            self.client = FalkorDB.from_url(self.url)
+        else:
+            self.client = FalkorDB(host=self.host, port=self.port, password=self.password)
+            
         self.graph = self.client.select_graph(self.graph_name)
         self.recent_queries: List[QueryLogEntry] = []
 

@@ -1,0 +1,34 @@
+services:
+  # 1. AI Video Director API (FastAPI Backend)
+  - type: web
+    name: kino-director-backend
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+      - key: PYTHONPATH
+        value: .
+      - key: FALKORDB_HOST
+        value: localhost
+      - key: FALKORDB_PORT
+        value: "6379"
+      - key: FALKORDB_GRAPH_NAME
+        value: ai_video_director
+
+  # 2. KINO Studio Workstation (Next.js Frontend)
+  - type: web
+    name: kino-director-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: kino-director-backend
+          property: host
