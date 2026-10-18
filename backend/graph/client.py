@@ -118,11 +118,14 @@ class VideoGraphDB:
         try:
             res = self.graph.query(cypher, clean_params)
         except Exception as e:
-            # If connection was lost or timed out, reset client to retry once
-            logger.warning(f"Query failed, reconnecting FalkorDB: {e}")
-            self._client = None
-            self._graph = None
-            res = self.graph.query(cypher, clean_params)
+            err_str = str(e).lower()
+            if any(term in err_str for term in ("connection", "timeout", "closed", "reset", "broken pipe", "nodename")):
+                logger.warning(f"Connection lost, reconnecting FalkorDB: {e}")
+                self._client = None
+                self._graph = None
+                res = self.graph.query(cypher, clean_params)
+            else:
+                raise e
             
         duration = (time.perf_counter() - start) * 1000.0
         row_count = len(res.result_set) if res and hasattr(res, "result_set") and res.result_set else 0
@@ -140,10 +143,14 @@ class VideoGraphDB:
         try:
             res = self.graph.ro_query(cypher, clean_params)
         except Exception as e:
-            logger.warning(f"Read-only query failed, reconnecting FalkorDB: {e}")
-            self._client = None
-            self._graph = None
-            res = self.graph.ro_query(cypher, clean_params)
+            err_str = str(e).lower()
+            if any(term in err_str for term in ("connection", "timeout", "closed", "reset", "broken pipe", "nodename")):
+                logger.warning(f"Connection lost, reconnecting FalkorDB: {e}")
+                self._client = None
+                self._graph = None
+                res = self.graph.ro_query(cypher, clean_params)
+            else:
+                raise e
             
         duration = (time.perf_counter() - start) * 1000.0
         row_count = len(res.result_set) if res and hasattr(res, "result_set") and res.result_set else 0
