@@ -9,15 +9,17 @@ from backend.graph.queries import (
     run_beat_matching_query,
     add_creator_preference,
     run_version_diff_query,
-    run_traceability_query
+    run_traceability_query,
+    get_reference_beats
 )
+from backend.llm import gemini
 from backend.video.renderer import render_edit_version
 
 logger = logging.getLogger(__name__)
 
 class RevisionAgent:
     """
-    Translates natural-language revision prompts into Cypher DAG mutations,
+    Translates natural-language revision prompts into Cypher DAG mutations via Gemini 2.5 Flash,
     maintains negative clip memory ([:REJECTED_FOR]), and updates durable CreatorPreference nodes.
     """
 
@@ -29,29 +31,16 @@ class RevisionAgent:
     ) -> Dict[str, Any]:
         """
         Executes conversational revision:
-        1. Checks for standing preference to store in durable memory.
-        2. Identifies target beat/cut to modify.
-        3. Branches a new EditVersion in the FalkorDB lineage DAG.
-        4. Writes a [:REJECTED_FOR] edge preventing the old clip from being picked again.
-        5. Matches a fresh candidate clip and links new CutDecision nodes.
-        6. Renders the new video preview.
+        1. Uses Gemini to parse intent, targeted beat, and potential learned preference rules.
+        2. Branches a new EditVersion in the FalkorDB lineage DAG.
+        3. Writes a [:REJECTED_FOR] edge preventing the old clip from being picked again for that beat.
+        4. Matches a fresh candidate clip honoring desired shot type and energy.
+        5. Writes new CutDecision nodes with explainable rationale.
+        6. Renders the new video preview and returns graph diff.
         """
         logger.info(f"RevisionAgent processing: '{user_prompt}' for project {project_id}")
 
-        # 1. Parse and extract standing CreatorPreferences (Track 02 Durable Memory)
-        learned_preference = self._extract_creator_preference(user_prompt)
-        if learned_preference:
-            pref_id = f"pref_{uuid.uuid4().hex[:8]}"
-            add_creator_preference(
-                creator_id=creator_id,
-                pref_id=pref_id,
-                category=learned_preference["category"],
-                rule_text=learned_preference["rule_text"],
-                weight=1.5
-            )
-            logger.info(f"Learned and stored new creator preference in FalkorDB: {learned_preference['rule_text']}")
-
-        # 2. Get the latest active EditVersion
+        # 1. Get the latest active EditVersion
         latest_version_cypher = """
         MATCH (p:Project {id: $project_id})-[:HAS_VERSION]->(v:EditVersion)
         RETURN v.id AS id, v.version_num AS version_num
@@ -66,10 +55,8 @@ class RevisionAgent:
         prev_version_id = prev_version["id"]
         prev_version_num = int(prev_version["version_num"])
 
-        # 3. Determine which beat is targeted
-        target_order = self._identify_target_beat(user_prompt)
-
-        # 4. Fetch the previous decisions
+        # 2. Fetch reference beats and previous cut decisions
+        current_beats = get_reference_beats(project_id)
         prev_decisions_cypher = """
         MATCH (v:EditVersion {id: $version_id})-[:HAS_DECISION]->(d:CutDecision)
         MATCH (d)-[:FULFILLS_BEAT]->(b:StoryBeat)
@@ -82,12 +69,37 @@ class RevisionAgent:
                b.role AS beat_role,
                b.target_duration AS target_duration,
                c.id AS clip_id,
+               c.shot_type AS shot_type,
                sa.filename AS filename
         ORDER BY d.timeline_order ASC
         """
         prev_decisions = db.query_as_dicts(prev_decisions_cypher, {"version_id": prev_version_id})
 
-        # 5. Execute Cypher Query 2: Mark old clip REJECTED_FOR and create new EditVersion
+        # 3. Gemini Revision Intent Parsing (or heuristic fallback)
+        intent = gemini.parse_revision_prompt(
+            user_prompt=user_prompt,
+            current_beats=current_beats,
+            current_decisions=prev_decisions
+        )
+        target_order = int(intent.get("target_order", 1))
+        desired_shot = intent.get("desired_shot_type")
+        desired_energy = intent.get("desired_energy_level")
+        gemini_rationale = intent.get("rationale")
+        learned_rule = intent.get("learned_rule") or self._extract_fallback_rule(user_prompt)
+
+        # 4. Store durable style preference if creator stated a standing rule
+        if learned_rule:
+            pref_id = f"pref_{uuid.uuid4().hex[:8]}"
+            add_creator_preference(
+                creator_id=creator_id,
+                pref_id=pref_id,
+                category="Pacing & Style",
+                rule_text=learned_rule,
+                weight=1.6
+            )
+            logger.info(f"Learned and stored new creator preference in FalkorDB: {learned_rule}")
+
+        # 5. Execute Cypher Query 2: Mark old clip REJECTED_FOR and branch new EditVersion in DAG
         new_version_id = f"v{prev_version_num + 1}_{uuid.uuid4().hex[:8]}"
         new_version_num = prev_version_num + 1
 
@@ -120,7 +132,14 @@ class RevisionAgent:
         target_beat_id = res[0]["target_beat_id"] if res else None
 
         # 6. Find a new replacement clip for target_order that is NOT rejected
-        replacement_clip = self._find_replacement_clip(project_id, target_beat_id, target_order, user_prompt)
+        replacement_clip = self._find_replacement_clip(
+            project_id=project_id,
+            beat_id=target_beat_id,
+            beat_order=target_order,
+            desired_shot=desired_shot,
+            desired_energy=desired_energy,
+            prompt=user_prompt
+        )
 
         # 7. Re-populate CutDecisions for the new EditVersion
         for dec in prev_decisions:
@@ -128,19 +147,17 @@ class RevisionAgent:
             dec_id = f"dec_{uuid.uuid4().hex[:8]}"
 
             if order == target_order and replacement_clip:
-                # Use new replacement clip
                 trim_in = float(replacement_clip.get("clip_in_sec", 0.0))
-                # Check if prompt specifies trimming (e.g., "trim to 2 seconds")
                 trimmed_dur = self._extract_duration(user_prompt) or float(dec["target_duration"])
                 trim_out = round(trim_in + trimmed_dur, 2)
                 chosen_clip_id = replacement_clip["clip_id"]
                 rationale = (
-                    f"Revised based on user prompt: '{user_prompt}'. "
-                    f"Replaced previous clip with high-affinity candidate {chosen_clip_id}. "
-                    f"Old clip marked [:REJECTED_FOR] in FalkorDB lineage."
+                    f"Revised via Director AI: '{user_prompt}'. "
+                    f"Selected candidate clip {chosen_clip_id} ({replacement_clip.get('shot_type', 'broll')}). "
+                    f"{gemini_rationale or 'Replaced rejected cut.'} "
+                    f"Previous clip marked [:REJECTED_FOR] in FalkorDB lineage."
                 )
             else:
-                # Retain original clip from previous version
                 trim_in = float(dec["in_sec"])
                 trim_out = float(dec["out_sec"])
                 chosen_clip_id = dec["clip_id"]
@@ -190,27 +207,8 @@ class RevisionAgent:
             "target_beat_order": target_order,
             "diff_summary": diff_results,
             "traceability": traceability,
-            "learned_preference": learned_preference
+            "learned_preference": {"category": "Pacing & Style", "rule_text": learned_rule} if learned_rule else None
         }
-
-    def _identify_target_beat(self, prompt: str) -> int:
-        """Parses target beat index from prompt (defaults to beat 2 if not explicitly specified)."""
-        prompt_lower = prompt.lower()
-        if "hook" in prompt_lower or "first" in prompt_lower or "clip 1" in prompt_lower or "beat 1" in prompt_lower or "#1" in prompt_lower:
-            return 1
-        elif "second" in prompt_lower or "clip 2" in prompt_lower or "beat 2" in prompt_lower or "#2" in prompt_lower or "setup" in prompt_lower:
-            return 2
-        elif "third" in prompt_lower or "clip 3" in prompt_lower or "beat 3" in prompt_lower or "#3" in prompt_lower or "demo" in prompt_lower:
-            return 3
-        elif "fourth" in prompt_lower or "clip 4" in prompt_lower or "beat 4" in prompt_lower or "#4" in prompt_lower or "cta" in prompt_lower or "outro" in prompt_lower:
-            return 4
-        
-        # Regex search for numbers
-        match = re.search(r'\b(?:beat|clip)\s*#?([1-4])\b', prompt_lower)
-        if match:
-            return int(match.group(1))
-            
-        return 2  # Default to beat 2 for generic revision requests
 
     def _extract_duration(self, prompt: str) -> Optional[float]:
         """Extracts seconds duration from phrases like 'trim to 2 seconds' or '2.5s'."""
@@ -219,14 +217,10 @@ class RevisionAgent:
             return float(match.group(1))
         return None
 
-    def _extract_creator_preference(self, prompt: str) -> Optional[Dict[str, str]]:
-        """Identifies persistent habits user wants remembered across projects."""
+    def _extract_fallback_rule(self, prompt: str) -> Optional[str]:
         p_lower = prompt.lower()
         if any(keyword in p_lower for keyword in ["remember", "always", "prefer", "standing rule", "future projects"]):
-            return {
-                "category": "Pacing & Style",
-                "rule_text": prompt.strip(),
-            }
+            return prompt.strip()
         return None
 
     def _find_replacement_clip(
@@ -234,11 +228,39 @@ class RevisionAgent:
         project_id: str,
         beat_id: Optional[str],
         beat_order: int,
-        prompt: str
+        desired_shot: Optional[str] = None,
+        desired_energy: Optional[int] = None,
+        prompt: str = ""
     ) -> Optional[Dict[str, Any]]:
         """
-        Traverses FalkorDB for a clip that fulfills the beat and has NOT been rejected.
+        Traverses FalkorDB for a clip that fulfills the beat, has NOT been rejected,
+        and matches the director's requested shot type and energy.
         """
+        # First try: match specific shot type if requested
+        if desired_shot:
+            cypher_shot = """
+            MATCH (p:Project {id: $project_id})-[:HAS_ASSET]->(sa:SourceAsset)-[:CONTAINS_CLIP]->(c:VideoClip)
+            OPTIONAL MATCH (b:StoryBeat {beat_index: $beat_order})
+            WHERE NOT (c)-[:REJECTED_FOR]->(b)
+              AND (c.shot_type = $desired_shot OR c.shot_type CONTAINS $desired_shot)
+            RETURN c.id AS clip_id,
+                   c.in_sec AS clip_in_sec,
+                   c.out_sec AS clip_out_sec,
+                   c.duration AS duration,
+                   c.shot_type AS shot_type,
+                   sa.filename AS source_file,
+                   c.energy_level AS energy_level
+            LIMIT 1
+            """
+            matches = db.query_as_dicts(cypher_shot, {
+                "project_id": project_id,
+                "beat_order": beat_order,
+                "desired_shot": desired_shot
+            })
+            if matches:
+                return matches[0]
+
+        # Second try: general un-rejected candidates
         cypher = """
         MATCH (p:Project {id: $project_id})-[:HAS_ASSET]->(sa:SourceAsset)-[:CONTAINS_CLIP]->(c:VideoClip)
         OPTIONAL MATCH (b:StoryBeat {beat_index: $beat_order})
@@ -247,6 +269,7 @@ class RevisionAgent:
                c.in_sec AS clip_in_sec,
                c.out_sec AS clip_out_sec,
                c.duration AS duration,
+               c.shot_type AS shot_type,
                sa.filename AS source_file,
                c.energy_level AS energy_level
         ORDER BY c.energy_level DESC
@@ -259,12 +282,13 @@ class RevisionAgent:
         if results:
             return results[0]
 
-        # Relaxed fallback
+        # Third try: relaxed fallback across assets
         fallback_cypher = """
         MATCH (p:Project {id: $project_id})-[:HAS_ASSET]->(sa:SourceAsset)-[:CONTAINS_CLIP]->(c:VideoClip)
         RETURN c.id AS clip_id,
                c.in_sec AS clip_in_sec,
                c.out_sec AS clip_out_sec,
+               c.shot_type AS shot_type,
                sa.filename AS source_file
         LIMIT 1
         """

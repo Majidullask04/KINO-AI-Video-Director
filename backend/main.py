@@ -38,9 +38,8 @@ from backend.video.renderer import (
     generate_sample_media,
     render_edit_version
 )
-from backend.video.fit_analyzer import analyze_clip_beat_fit
+from backend.agents.director_agent import director, analyze_clip_beat_fit
 from backend.agents.ingestor_agent import ingestor
-from backend.agents.director_agent import director
 from backend.agents.revision_agent import revision
 
 logging.basicConfig(level=logging.INFO)

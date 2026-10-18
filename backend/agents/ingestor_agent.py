@@ -8,42 +8,9 @@ from backend.graph.client import db
 from backend.video.renderer import detect_scenes
 from backend.video.analyzer import visual_analyzer
 
-logger = logging.getLogger(__name__)
+from backend.beats import DEFAULT_BEAT_TEMPLATES
 
-DEFAULT_BEAT_TEMPLATES = [
-    {
-        "role": "hook",
-        "target_duration": 3.0,
-        "energy_level": 5,
-        "required_shot_type": "closeup",
-        "transition": "hard_cut",
-        "required_tags": ["talking_head", "closeup", "hook"]
-    },
-    {
-        "role": "setup",
-        "target_duration": 3.0,
-        "energy_level": 3,
-        "required_shot_type": "wide",
-        "transition": "dissolve",
-        "required_tags": ["closeup", "screen", "explainer"]
-    },
-    {
-        "role": "demonstration",
-        "target_duration": 3.0,
-        "energy_level": 4,
-        "required_shot_type": "product_shot",
-        "transition": "hard_cut",
-        "required_tags": ["product_shot", "demo", "screen"]
-    },
-    {
-        "role": "cta",
-        "target_duration": 3.0,
-        "energy_level": 4,
-        "required_shot_type": "closeup",
-        "transition": "fade_black",
-        "required_tags": ["broll", "outdoor", "lifestyle"]
-    }
-]
+logger = logging.getLogger(__name__)
 
 class IngestorAgent:
     """
