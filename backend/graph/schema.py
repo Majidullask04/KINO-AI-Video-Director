@@ -13,6 +13,8 @@ INDEX_STATEMENTS = [
     "CREATE INDEX FOR (t:VisualTag) ON (t.name)",
     "CREATE INDEX FOR (m:AudioMood) ON (m.name)",
     "CREATE INDEX FOR (sa:SourceAsset) ON (sa.id)",
+    "CREATE INDEX FOR (fb:Feedback) ON (fb.id)",
+    "CREATE INDEX FOR (pref:CreatorPreference) ON (pref.id)",
 ]
 
 def init_schema():

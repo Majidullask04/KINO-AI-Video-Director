@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Send,
   RefreshCw,
   CheckCircle2,
   Cpu,
-  Bookmark
+  Bookmark,
+  Play,
+  Zap,
+  SlidersHorizontal
 } from "lucide-react";
 import { CreatorPreference } from "@/types";
 
@@ -25,12 +28,16 @@ interface DirectorChatProps {
   isRevising: boolean;
   activeVersionNum: number;
   creatorPreferences?: CreatorPreference[];
+  initialBriefing?: string | null;
 }
 
 const QUICK_PROMPTS = [
-  "Swap Beat 2 for higher-energy B-roll",
-  "Trim opening hook to 2.0s and save preference",
-  "Use close-up code shot for demonstration beat",
+  { label: "Increase pacing across all beats", prompt: "Increase pacing across all beats to energy level 4-5" },
+  { label: "Swap Beat 2 for closer code view", prompt: "Swap Beat 2 for closer code view" },
+  { label: "Trim opening hook to 2.0s", prompt: "Trim opening hook to 2.0s and save preference" },
+  { label: "Prioritize high-energy B-roll", prompt: "Swap demonstration beat with high-energy b-roll shot" },
+  { label: "Cinematic calm pacing style", prompt: "Use deliberate narrative calm pacing with longer trims" },
+  { label: "Save rule: Always high-energy hook", prompt: "Remember preference: always use high-energy hook" },
 ];
 
 export const DirectorChat: React.FC<DirectorChatProps> = ({
@@ -38,6 +45,7 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
   isRevising,
   activeVersionNum,
   creatorPreferences = [],
+  initialBriefing,
 }) => {
   const [inputPrompt, setInputPrompt] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -50,11 +58,28 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
     },
   ]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputPrompt.trim() || isRevising) return;
+  // Proactively ingest AI briefing when footage is uploaded or synthesized
+  useEffect(() => {
+    if (initialBriefing && initialBriefing.trim()) {
+      setMessages((prev) => {
+        if (prev.some((m) => m.text === initialBriefing)) return prev;
+        return [
+          ...prev,
+          {
+            id: `brief_${Date.now()}`,
+            sender: "assistant",
+            text: initialBriefing,
+            timestamp: "Just now",
+            versionNum: activeVersionNum,
+          },
+        ];
+      });
+    }
+  }, [initialBriefing, activeVersionNum]);
 
-    const userText = inputPrompt.trim();
+  const executeRevision = async (text: string) => {
+    if (!text.trim() || isRevising) return;
+    const userText = text.trim();
     setInputPrompt("");
 
     const newMsg: ChatMessage = {
@@ -71,7 +96,7 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
       const assistantReply: ChatMessage = {
         id: `asst_${Date.now()}`,
         sender: "assistant",
-        text: `Mutation complete. Created EditVersion v${activeVersionNum + 1} in the FalkorDB lineage DAG.`,
+        text: `Mutation complete. Branched EditVersion v${activeVersionNum + 1} in the FalkorDB lineage DAG.`,
         timestamp: "Just now",
         versionNum: activeVersionNum + 1,
         learnedPreference: isMemoryPrompt ? userText : undefined,
@@ -92,6 +117,11 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
       };
       setMessages((prev) => [...prev, errorReply]);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await executeRevision(inputPrompt);
   };
 
   return (
@@ -163,7 +193,7 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
                   : "bg-[#0c0c0e] text-zinc-300 border border-[#222228]"
               }`}
             >
-              <p>{m.text}</p>
+              <p className="whitespace-pre-line">{m.text}</p>
 
               {/* Execution Steps Trace Card */}
               {m.executionSteps && (
@@ -207,21 +237,35 @@ export const DirectorChat: React.FC<DirectorChatProps> = ({
         )}
       </div>
 
-      {/* 4. Quick Revision Prompts (Plain text buttons, NO emojis) */}
+      {/* 4. Quick Revision Directives (1-Click AI Execution) */}
       <div className="px-3 py-2 border-t border-[#222228] bg-[#0c0c0e]">
-        <div className="text-[9px] text-zinc-500 uppercase tracking-wider font-mono font-medium mb-1.5">
-          QUICK PROMPTS
+        <div className="flex items-center justify-between text-[9px] text-zinc-500 uppercase tracking-wider font-mono font-medium mb-1.5">
+          <span>AI EDITING DIRECTIVES</span>
+          <span className="text-amber-500">1-CLICK MUTATE</span>
         </div>
         <div className="flex flex-col gap-1.5">
-          {QUICK_PROMPTS.map((prompt, i) => (
-            <button
-              key={i}
-              onClick={() => setInputPrompt(prompt)}
-              className="text-[11px] bg-[#121215] hover:bg-[#18181c] text-zinc-300 hover:text-white px-2 py-1.5 rounded border border-[#222228] transition-all text-left truncate font-normal"
-              style={{ width: "100%", justifyContent: "flex-start" }}
-            >
-              {prompt}
-            </button>
+          {QUICK_PROMPTS.map((item, i) => (
+            <div key={i} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => executeRevision(item.prompt)}
+                disabled={isRevising}
+                className="text-[11px] bg-[#121215] hover:bg-[#18181c] text-zinc-300 hover:text-white px-2 py-1.5 rounded border border-[#222228] transition-all text-left truncate font-normal flex-1 flex items-center justify-between disabled:opacity-50"
+                title={`Apply: ${item.prompt}`}
+              >
+                <span className="truncate">{item.label}</span>
+                <span className="text-[9px] font-mono text-amber-500 font-medium uppercase shrink-0 ml-1">Run</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputPrompt(item.prompt)}
+                disabled={isRevising}
+                className="text-[10px] text-zinc-500 hover:text-zinc-300 px-2 py-1.5 rounded bg-[#121215] border border-[#222228] shrink-0 font-mono"
+                title="Edit prompt text"
+              >
+                Edit
+              </button>
+            </div>
           ))}
         </div>
       </div>

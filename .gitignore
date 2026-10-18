@@ -26,6 +26,10 @@ frontend/build/
 .env.test.local
 .env.production.local
 
-# Media cache
+# Media cache & uploads
 backend/static/renders/*.mp4
+backend/static/uploads/*
+!backend/static/uploads/.gitkeep
+backend/static/*.mov
+*.mov
 !backend/static/samples/*.mp4

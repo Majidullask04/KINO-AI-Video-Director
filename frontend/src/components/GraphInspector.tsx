@@ -10,23 +10,34 @@ import {
   Check,
   Database,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Eye,
+  RefreshCw,
+  X,
+  ShieldCheck,
+  Activity
 } from "lucide-react";
 
 interface GraphInspectorProps {
   selectedDecision: CutDecision | null;
   graphState: GraphState | null;
   onRefreshGraph: () => void;
+  onSubmitFeedback?: (decision: CutDecision, action: "keep" | "replace" | "reject", reason?: string) => Promise<void>;
+  isSubmittingFeedback?: boolean;
 }
 
 export const GraphInspector: React.FC<GraphInspectorProps> = ({
   selectedDecision,
   graphState,
   onRefreshGraph,
+  onSubmitFeedback,
+  isSubmittingFeedback = false,
 }) => {
   const [activeTab, setActiveTab] = useState<"topology" | "cypher">("topology");
   const [selectedLogIndex, setSelectedLogIndex] = useState<number>(0);
   const [copiedQueryIndex, setCopiedQueryIndex] = useState<number | null>(null);
+  const [lastFeedbackAction, setLastFeedbackAction] = useState<string | null>(null);
+  const [feedbackReason, setFeedbackReason] = useState<string>("");
 
   const queryLogs: QueryLog[] = graphState?.query_logs || [];
 
@@ -34,6 +45,13 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
     navigator.clipboard.writeText(query);
     setCopiedQueryIndex(idx);
     setTimeout(() => setCopiedQueryIndex(null), 2000);
+  };
+
+  const handleAction = async (action: "keep" | "replace" | "reject") => {
+    if (!selectedDecision || !onSubmitFeedback) return;
+    setLastFeedbackAction(action);
+    await onSubmitFeedback(selectedDecision, action, feedbackReason);
+    setTimeout(() => setLastFeedbackAction(null), 4000);
   };
 
   const selectedCut = selectedDecision;
@@ -249,7 +267,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
 
             {/* Traceability Card */}
             {selectedCut ? (
-              <div className="p-3 rounded-[6px] bg-[#0c0c0e] border border-[#222228] space-y-2">
+              <div className="p-3 rounded-[6px] bg-[#0c0c0e] border border-[#222228] space-y-2.5">
                 <div className="flex items-center justify-between text-xs font-semibold">
                   <span className="text-[#f4f4f6] flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-amber-500" strokeWidth={1.6} />
@@ -264,17 +282,95 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
                   {selectedCut.explanation}
                 </p>
 
-                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                {/* Computer Vision Telemetry */}
+                <div className="grid grid-cols-3 gap-1.5 text-xs font-mono">
                   <div className="p-2 rounded bg-[#121215] border border-[#222228]">
-                    <span className="text-[9px] text-zinc-500 uppercase block">Source File</span>
-                    <span className="text-zinc-200 truncate block">{selectedCut.source_asset}</span>
-                  </div>
-                  <div className="p-2 rounded bg-[#121215] border border-[#222228]">
-                    <span className="text-[9px] text-zinc-500 uppercase block">Trim Window</span>
-                    <span className="text-amber-400 block">
-                      {selectedCut.source_in_sec.toFixed(2)}s ➔ {selectedCut.source_out_sec.toFixed(2)}s
+                    <span className="text-[9px] text-zinc-500 uppercase flex items-center gap-1">
+                      <Eye className="w-2.5 h-2.5 text-cyan-400" />
+                      CV Shot Type
+                    </span>
+                    <span className="text-cyan-300 font-semibold uppercase text-[11px] block mt-0.5">
+                      {selectedCut.shot_type || "broll"}
                     </span>
                   </div>
+                  <div className="p-2 rounded bg-[#121215] border border-[#222228]">
+                    <span className="text-[9px] text-zinc-500 uppercase flex items-center gap-1">
+                      <Activity className="w-2.5 h-2.5 text-amber-400" />
+                      Visual Energy
+                    </span>
+                    <span className="text-amber-300 font-semibold text-[11px] block mt-0.5">
+                      {selectedCut.energy_level || 3} / 5
+                    </span>
+                  </div>
+                  <div className="p-2 rounded bg-[#121215] border border-[#222228]">
+                    <span className="text-[9px] text-zinc-500 uppercase flex items-center gap-1">
+                      <Clock className="w-2.5 h-2.5 text-zinc-400" />
+                      Trim Window
+                    </span>
+                    <span className="text-zinc-200 text-[10.5px] block mt-0.5">
+                      {selectedCut.source_in_sec.toFixed(1)}s–{selectedCut.source_out_sec.toFixed(1)}s
+                    </span>
+                  </div>
+                </div>
+
+                {/* Customer Taste Feedback Engine (Requirements 3 & 4) */}
+                <div className="p-2.5 rounded bg-[#15151a] border border-[#2c2c36] space-y-2 mt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                      Customer Taste Feedback
+                    </span>
+                    <span className="text-[9.5px] text-zinc-400 font-mono">
+                      Track 02 Taste Memory
+                    </span>
+                  </div>
+
+                  <p className="text-[10.5px] text-zinc-400">
+                    Record what worked to train and reinforce future AI director rankings:
+                  </p>
+
+                  {/* Feedback Action Buttons */}
+                  <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                    <button
+                      onClick={() => handleAction("keep")}
+                      disabled={isSubmittingFeedback}
+                      className="px-2 py-1.5 rounded bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/60 font-medium text-[11px] flex items-center justify-center gap-1 transition-all hover:border-emerald-500 active:scale-95 disabled:opacity-50"
+                      title="Keep this suggestion: locks and reinforces this shot type into persistent creator style memory"
+                    >
+                      <Check className="w-3 h-3 text-emerald-400" strokeWidth={2.2} />
+                      <span>Keep Cut</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleAction("replace")}
+                      disabled={isSubmittingFeedback}
+                      className="px-2 py-1.5 rounded bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-800/60 font-medium text-[11px] flex items-center justify-center gap-1 transition-all hover:border-amber-500 active:scale-95 disabled:opacity-50"
+                      title="Replace this suggestion: requests an alternative candidate clip from FalkorDB"
+                    >
+                      <RefreshCw className="w-3 h-3 text-amber-400" strokeWidth={2} />
+                      <span>Replace</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleAction("reject")}
+                      disabled={isSubmittingFeedback}
+                      className="px-2 py-1.5 rounded bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 font-medium text-[11px] flex items-center justify-center gap-1 transition-all hover:border-rose-500 active:scale-95 disabled:opacity-50"
+                      title="Reject this suggestion: adds negative memory edge to prevent reuse and lowers clip ranking"
+                    >
+                      <X className="w-3 h-3 text-rose-400" strokeWidth={2.2} />
+                      <span>Reject</span>
+                    </button>
+                  </div>
+
+                  {/* Feedback Confirmation HUD */}
+                  {lastFeedbackAction && (
+                    <div className="px-2 py-1 rounded bg-[#0e0e12] border border-amber-500/40 text-[10px] text-amber-300 flex items-center gap-1.5 animate-fadeIn">
+                      <Check className="w-2.5 h-2.5 text-amber-400" />
+                      <span>
+                        Recorded <strong>{lastFeedbackAction.toUpperCase()}</strong> in FalkorDB. Learned taste preference reinforced!
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

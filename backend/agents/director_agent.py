@@ -42,14 +42,28 @@ class DirectorAgent:
                 beats_map[b_id] = []
             beats_map[b_id].append(m)
 
-        # 3. Create EditVersion v1 node in FalkorDB
-        version_id = f"v1_{uuid.uuid4().hex[:8]}"
+        # 3. Create incremental EditVersion node in FalkorDB
+        ver_check_cypher = """
+        MATCH (p:Project {id: $project_id})-[:HAS_VERSION]->(v:EditVersion)
+        RETURN coalesce(max(v.version_num), 0) AS max_v
+        """
+        v_res = db.query_as_dicts(ver_check_cypher, {"project_id": project_id})
+        max_v = v_res[0]["max_v"] if v_res and v_res[0].get("max_v") is not None else 0
+        new_version_num = int(max_v) + 1
+        version_id = f"v{new_version_num}_{uuid.uuid4().hex[:8]}"
+
+        # Deactivate older active versions
+        db.query("""
+        MATCH (p:Project {id: $project_id})-[r:HAS_VERSION]->(v:EditVersion)
+        SET r.is_active = false
+        """, {"project_id": project_id})
+
         create_version_cypher = """
         MATCH (p:Project {id: $project_id})
         CREATE (v:EditVersion {
             id: $version_id,
-            version_num: 1,
-            prompt_summary: 'Initial Graph-Synthesized Edit',
+            version_num: $version_num,
+            prompt_summary: $prompt_summary,
             render_status: 'rendering',
             preview_url: '',
             created_at: timestamp()
@@ -59,10 +73,12 @@ class DirectorAgent:
         """
         db.query(create_version_cypher, {
             "project_id": project_id,
-            "version_id": version_id
+            "version_id": version_id,
+            "version_num": new_version_num,
+            "prompt_summary": f"Graph-Synthesized Edit v{new_version_num}"
         })
 
-        # 4. Greedily assign best non-overlapping clip per beat
+        # 4. Rank candidate clips per beat using customer's style, preferences, and feedback
         used_clips = set()
         decisions_created = []
 
@@ -73,6 +89,86 @@ class DirectorAgent:
         )
 
         for order, (b_id, candidates) in enumerate(sorted_beats, start=1):
+            # Evaluate every candidate clip against customer's style preferences & historical feedback
+            for cand in candidates:
+                base_score = float(cand.get("total_match_score", 3.0))
+                pref_score = 0.0
+                pref_reasons = []
+
+                # Evaluate against each CreatorPreference node
+                for p in preferences:
+                    rule_lower = p.get("rule_text", "").lower()
+                    weight = float(p.get("weight", 1.0))
+                    sessions = int(p.get("reinforced_sessions", 1))
+                    session_factor = min(2.5, 1.0 + (sessions - 1) * 0.25)
+                    eff_weight = weight * session_factor
+
+                    # Role-to-shot style matching
+                    if cand["beat_role"] == "hook" and ("hook" in rule_lower or "opening" in rule_lower):
+                        if cand["shot_type"] in ("talking_head", "closeup") and ("talking head" in rule_lower or "close-up" in rule_lower or "closeup" in rule_lower):
+                            bonus = round(2.5 * eff_weight, 2)
+                            pref_score += bonus
+                            pref_reasons.append(f"Favors {cand['shot_type']} on hook (+{bonus})")
+                    elif cand["beat_role"] in ("demonstration", "setup") and ("demo" in rule_lower or "screen" in rule_lower or "code" in rule_lower or "technical" in rule_lower):
+                        if cand["shot_type"] in ("screen", "product_shot", "closeup"):
+                            bonus = round(2.5 * eff_weight, 2)
+                            pref_score += bonus
+                            pref_reasons.append(f"Prefers screen/code for demonstration (+{bonus})")
+                    elif cand["beat_role"] in ("cta", "outro") and ("cta" in rule_lower or "b-roll" in rule_lower or "outro" in rule_lower or "action" in rule_lower):
+                        if cand["shot_type"] in ("broll", "outdoor", "lifestyle"):
+                            bonus = round(2.5 * eff_weight, 2)
+                            pref_score += bonus
+                            pref_reasons.append(f"Prefers b-roll/lifestyle for CTA (+{bonus})")
+
+                    # Energy & pacing preference matching
+                    if "high energy" in rule_lower or "high-energy" in rule_lower or "fast" in rule_lower or "rapid" in rule_lower:
+                        if int(cand.get("clip_energy_level", 3)) >= 4:
+                            bonus = round(1.8 * eff_weight, 2)
+                            pref_score += bonus
+                            pref_reasons.append(f"Aligns with high-energy pacing (+{bonus})")
+                        elif int(cand.get("clip_energy_level", 3)) <= 2:
+                            penalty = round(1.5 * eff_weight, 2)
+                            pref_score -= penalty
+                            pref_reasons.append(f"Penalized for low energy against preference (-{penalty})")
+                    elif "calm" in rule_lower or "deliberate" in rule_lower:
+                        if int(cand.get("clip_energy_level", 3)) <= 3:
+                            bonus = round(1.6 * eff_weight, 2)
+                            pref_score += bonus
+                            pref_reasons.append(f"Aligns with calm pacing preference (+{bonus})")
+
+                    # Avoidance rules from learned negative feedback
+                    if "avoid" in rule_lower:
+                        if cand["shot_type"] in rule_lower and cand["beat_role"] in rule_lower:
+                            penalty = round(3.5 * eff_weight, 2)
+                            pref_score -= penalty
+                            pref_reasons.append(f"Demoted by avoidance preference (-{penalty})")
+
+                    # Visual tag keyword matching
+                    for tag in cand.get("matched_tags", []):
+                        if tag in rule_lower:
+                            bonus = round(0.8 * eff_weight, 2)
+                            pref_score += bonus
+                            pref_reasons.append(f"Tag '{tag}' aligns with customer style (+{bonus})")
+
+                # Historical feedback score (Requirement 3 & 4)
+                keeps = int(cand.get("keep_count", 0))
+                replaces = int(cand.get("replace_count", 0))
+                rejects = int(cand.get("reject_count", 0))
+                fb_score = (keeps * 2.0) - (replaces * 1.0) - (rejects * 3.0)
+                if keeps > 0:
+                    pref_reasons.append(f"Reinforced by {keeps} previous Keep choices (+{keeps * 2.0:.1f})")
+                if rejects > 0:
+                    pref_reasons.append(f"Demoted by {rejects} previous Rejection choices (-{rejects * 3.0:.1f})")
+
+                composite_score = round(base_score + pref_score + fb_score, 2)
+                cand["composite_score"] = composite_score
+                cand["pref_score"] = round(pref_score, 2)
+                cand["fb_score"] = round(fb_score, 2)
+                cand["pref_reasons"] = pref_reasons
+
+            # Rank candidate clips descending by customer-aligned composite score
+            candidates.sort(key=lambda c: c.get("composite_score", 0.0), reverse=True)
+
             chosen = None
             for cand in candidates:
                 if cand["clip_id"] not in used_clips:
@@ -80,7 +176,7 @@ class DirectorAgent:
                     used_clips.add(cand["clip_id"])
                     break
             
-            # Fallback to first candidate if all clips used
+            # Fallback to top-ranked candidate if all clips used
             if not chosen and candidates:
                 chosen = candidates[0]
 
@@ -92,14 +188,18 @@ class DirectorAgent:
             clip_in = float(chosen["clip_in_sec"])
             clip_out = round(clip_in + target_dur, 2)
             
-            # Formulate explainable AI rationale from graph attributes
+            # Formulate explainable AI rationale directly citing creator preferences and feedback
             matched_tags = chosen.get("matched_tags", [])
             tag_str = ", ".join(matched_tags) if matched_tags else "contextual fit"
-            score = round(float(chosen.get("total_match_score", 3.5)), 2)
+            score = round(float(chosen.get("composite_score", chosen.get("total_match_score", 3.5))), 2)
+            
+            style_reasons = chosen.get("pref_reasons", [])
+            style_explanation = "; ".join(style_reasons) if style_reasons else f"Honoring creator style memory: '{pref_summary[:50]}...'"
+            
             rationale = (
-                f"Selected for Beat #{chosen['beat_index']} ({chosen['beat_role']}) "
-                f"matching required visual tags: [{tag_str}] with score {score}/5.0. "
-                f"Honoring creator memory: '{pref_summary[:60]}...'"
+                f"Ranked #1 for Beat #{chosen['beat_index']} ({chosen['beat_role']}) with composite score {score}/10.0 "
+                f"(Base fit: {chosen['total_match_score']}, Style bonus: +{chosen['pref_score']}, Feedback: {chosen['fb_score']:+}). "
+                f"Style rationale: {style_explanation}."
             )
 
             # Persist CutDecision node linked to EditVersion, StoryBeat, and VideoClip
@@ -151,7 +251,7 @@ class DirectorAgent:
 
         return {
             "version_id": version_id,
-            "version_num": 1,
+            "version_num": new_version_num,
             "preview_url": preview_url,
             "decisions": decisions_created,
             "traceability": traceability,

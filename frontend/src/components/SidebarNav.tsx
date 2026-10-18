@@ -64,7 +64,7 @@ const SECTIONS: NavSection[] = [
     title: "INGEST & ANALYSIS",
     items: [
       { id: "reference", label: "Reference Pacing", icon: Activity, shortcut: "⌘4" },
-      { id: "footage", label: "Media Bin", icon: Video, shortcut: "⌘5" },
+      { id: "footage", label: "Media Bin & Upload", icon: Video, shortcut: "⌘5" },
     ],
   },
   {

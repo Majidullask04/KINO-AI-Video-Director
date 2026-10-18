@@ -15,7 +15,11 @@ import {
   CreatorPreference,
   GraphState,
   VersionDiffItem,
+  FeedbackSummary,
+  FeedbackItem,
   formatSMPTE,
+  BeatFitRecommendation,
+  ClipFitAnalysis,
 } from "@/types";
 import {
   Play,
@@ -55,6 +59,12 @@ import {
   Upload,
   Link as LinkIcon,
   Video,
+  Target,
+  FolderUp,
+  RefreshCw,
+  X,
+  AlertCircle,
+  Sparkles,
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000";
@@ -84,6 +94,20 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSeeding, setIsSeeding] = useState<boolean>(false);
   const [isRevising, setIsRevising] = useState<boolean>(false);
+
+  // Customer Feedback & Taste Learning State (Track 02)
+  const [feedbackSummary, setFeedbackSummary] = useState<FeedbackSummary | null>(null);
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState<boolean>(false);
+  const [isLearningTaste, setIsLearningTaste] = useState<boolean>(false);
+
+  // Video Clip Upload & Beat Fit Analysis State
+  const [isUploadingFootage, setIsUploadingFootage] = useState<boolean>(false);
+  const [uploadStatusText, setUploadStatusText] = useState<string>("");
+  const [selectedClipFitAnalysis, setSelectedClipFitAnalysis] = useState<ClipFitAnalysis | null>(null);
+  const [isAnalyzingFit, setIsAnalyzingFit] = useState<boolean>(false);
+  const [isAssigningClip, setIsAssigningClip] = useState<boolean>(false);
+  const [toastNotice, setToastNotice] = useState<string | null>(null);
+  const [directorBriefing, setDirectorBriefing] = useState<string | null>(null);
 
   // New Project Wizard State
   const [newTitle, setNewTitle] = useState("");
@@ -123,7 +147,20 @@ export default function Home() {
   useEffect(() => {
     fetchProjects();
     fetchCreatorPreferences();
+    fetchFeedbackSummary();
   }, []);
+
+  const fetchFeedbackSummary = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/creator/feedback`);
+      if (res.ok) {
+        const data = await res.json();
+        setFeedbackSummary(data);
+      }
+    } catch (e) {
+      console.warn("Could not fetch feedback summary:", e);
+    }
+  };
 
   const fetchProjects = async () => {
     try {
@@ -360,26 +397,163 @@ export default function Home() {
     }
   };
 
-  // 9. Load Demo Footage Pack
-  const handleLoadDemoFootage = async () => {
-    if (!activeProject) return;
-    setIsLoading(true);
+  // 9. Upload Raw Video Footage & Analyze Beat Fit
+  const handleUploadFootageFiles = async (files: FileList | File[]) => {
+    const targetProject = activeProject || projects[0];
+    if (!targetProject) return;
+
+    setIsUploadingFootage(true);
+    setUploadStatusText("Uploading video footage to media ingest server...");
     try {
       const formData = new FormData();
-      const res = await fetch(
-        `${API_BASE}/api/projects/${activeProject.id}/upload-footage`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+      Array.from(files).forEach((file) => {
+        formData.append("files", file);
+      });
+
+      setUploadStatusText("Running OpenCV frame differencing & edge density analysis...");
+      const res = await fetch(`${API_BASE}/api/projects/${targetProject.id}/upload-footage`, {
+        method: "POST",
+        body: formData,
+      });
+
       if (res.ok) {
-        await loadProjectDetails(activeProject);
+        setUploadStatusText("Synthesizing timeline edit in FalkorDB and preparing Editorial Copilot...");
+        const data = await res.json();
+        await loadProjectDetails(targetProject);
+
+        if (data.plan) {
+          if (data.plan.traceability && data.plan.traceability.length > 0) {
+            setDecisions(data.plan.traceability);
+            setSelectedDecision(data.plan.traceability[0]);
+          }
+          if (data.plan.preview_url) {
+            setActivePreviewUrl(`${API_BASE}${data.plan.preview_url}`);
+          }
+        }
+
+        if (data.assistant_briefing) {
+          setDirectorBriefing(data.assistant_briefing);
+        }
+
+        // Close any blocking modal
+        setSelectedClipFitAnalysis(null);
+
+        // STRAIGHT TRANSITION INTO EDITING SECTION (STUDIO)
+        setCurrentScreen("studio");
+
+        setToastNotice(`Footage uploaded & analyzed! AI Director synthesized timeline cut v${data.plan?.version_num || 1}.`);
+        setTimeout(() => setToastNotice(null), 5000);
+      }
+    } catch (e) {
+      console.error("Error uploading footage:", e);
+      setToastNotice("Error uploading video footage. Please verify backend connection.");
+      setTimeout(() => setToastNotice(null), 5000);
+    } finally {
+      setIsUploadingFootage(false);
+      setUploadStatusText("");
+    }
+  };
+
+  // Quick Ingest Sample Footage Pack with AI Beat Fit
+  const handleLoadDemoFootage = async () => {
+    const targetProject = activeProject || projects[0];
+    if (!targetProject) return;
+    setIsUploadingFootage(true);
+    setUploadStatusText("Ingesting sample video pack and synthesizing timeline...");
+    try {
+      const formData = new FormData();
+      const res = await fetch(`${API_BASE}/api/projects/${targetProject.id}/upload-footage`, {
+        method: "POST",
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        await loadProjectDetails(targetProject);
+
+        if (data.plan) {
+          if (data.plan.traceability && data.plan.traceability.length > 0) {
+            setDecisions(data.plan.traceability);
+            setSelectedDecision(data.plan.traceability[0]);
+          }
+          if (data.plan.preview_url) {
+            setActivePreviewUrl(`${API_BASE}${data.plan.preview_url}`);
+          }
+        }
+
+        if (data.assistant_briefing) {
+          setDirectorBriefing(data.assistant_briefing);
+        }
+
+        setSelectedClipFitAnalysis(null);
+
+        // STRAIGHT TRANSITION INTO EDITING SECTION (STUDIO)
+        setCurrentScreen("studio");
+
+        setToastNotice(`Sample footage indexed! AI Director synthesized timeline cut v${data.plan?.version_num || 1}.`);
+        setTimeout(() => setToastNotice(null), 5000);
       }
     } catch (e) {
       console.error("Error indexing footage:", e);
     } finally {
-      setIsLoading(false);
+      setIsUploadingFootage(false);
+      setUploadStatusText("");
+    }
+  };
+
+  // Analyze Beat Fit for any clip in the media bin
+  const handleAnalyzeClipFit = async (clipId: string) => {
+    const targetProject = activeProject || projects[0];
+    if (!targetProject) return;
+    setIsAnalyzingFit(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${targetProject.id}/clips/${clipId}/best-fit`);
+      if (res.ok) {
+        const data: ClipFitAnalysis = await res.json();
+        setSelectedClipFitAnalysis(data);
+      }
+    } catch (e) {
+      console.error("Error analyzing clip beat fit:", e);
+    } finally {
+      setIsAnalyzingFit(false);
+    }
+  };
+
+  // Assign clip directly to a story beat in the project timeline
+  const handleAssignClipToBeat = async (clipId: string, beatIndex: number, beatId?: string) => {
+    const targetProject = activeProject || projects[0];
+    if (!targetProject) return;
+    setIsAssigningClip(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${targetProject.id}/assign-clip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clip_id: clipId,
+          beat_index: beatIndex,
+          beat_id: beatId,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        await loadProjectDetails(targetProject);
+        if (data.version?.preview_url) {
+          setActivePreviewUrl(`${API_BASE}${data.version.preview_url}`);
+        }
+        if (data.version?.traceability) {
+          setDecisions(data.version.traceability);
+          if (data.version.traceability.length > 0) {
+            setSelectedDecision(data.version.traceability[0]);
+          }
+        }
+        setSelectedClipFitAnalysis(null);
+        setCurrentScreen("studio");
+        setToastNotice(`Assigned clip to Beat ${beatIndex}! Branched timeline to EditVersion v${data.version_num}.`);
+        setTimeout(() => setToastNotice(null), 5000);
+      }
+    } catch (e) {
+      console.error("Error assigning clip to beat:", e);
+    } finally {
+      setIsAssigningClip(false);
     }
   };
 
@@ -416,6 +590,58 @@ export default function Home() {
       }
     } catch (e) {
       console.error("Error deleting preference:", e);
+    }
+  };
+
+  // 11. Customer Taste Feedback & Learning Handlers (Requirements 3 & 4)
+  const handleSubmitFeedback = async (
+    decision: CutDecision,
+    action: "keep" | "replace" | "reject",
+    reason?: string
+  ) => {
+    if (!activeProject) return;
+    setIsSubmittingFeedback(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${activeProject.id}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          clip_id: decision.clip_id,
+          beat_id: decision.beat_id,
+          decision_id: decision.decision_id,
+          reason: reason || `Customer marked suggestion as ${action}`,
+          creator_id: "creator_default"
+        })
+      });
+      if (res.ok) {
+        await fetchCreatorPreferences();
+        await fetchFeedbackSummary();
+        if (action === "replace" || action === "reject") {
+          await handleSendRevision(`Replace Cut #${decision.order} (${decision.narrative_beat}) with an alternative clip.`);
+        }
+      }
+    } catch (err) {
+      console.error("Error submitting feedback:", err);
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
+  };
+
+  const handleTriggerTasteLearning = async () => {
+    setIsLearningTaste(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/creator/learn-taste`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await fetchCreatorPreferences();
+        await fetchFeedbackSummary();
+      }
+    } catch (err) {
+      console.error("Error learning taste:", err);
+    } finally {
+      setIsLearningTaste(false);
     }
   };
 
@@ -520,7 +746,7 @@ export default function Home() {
           >
             {[
               { id: "reference", label: "01 Reference" },
-              { id: "footage", label: "02 Media Bin" },
+              { id: "footage", label: "02 Media Bin & Upload" },
               { id: "studio", label: "03 Timeline Studio" },
               { id: "revisions", label: "04 Compare & Export" },
             ].map((tab) => {
@@ -846,7 +1072,7 @@ export default function Home() {
                             fontSize: "11px",
                           }}
                         >
-                          <span style={{ color: "#E4E4E7", truncate: "true", maxWidth: "260px" }}>
+                          <span className="truncate" style={{ color: "#E4E4E7", maxWidth: "260px" }}>
                             {pref.rule_text}
                           </span>
                           <span className="tech-tag-amber">
@@ -1519,10 +1745,156 @@ export default function Home() {
             </div>
           )}
 
-          {/* TAB 5: MEDIA BIN (Live Video Contact Sheet — Zero Empty Placeholders) */}
+          {/* TAB 5: MEDIA BIN & UPLOAD (Full Footage Ingest & AI StoryBeat Fit Analyzer) */}
           {currentScreen === "footage" && (
             <div className="page-scroll-container" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-              {/* Top Bar */}
+              {/* 1. Raw Footage Upload & Computer Vision Dropzone */}
+              <div
+                className="studio-card"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    handleUploadFootageFiles(e.dataTransfer.files);
+                  }
+                }}
+                style={{
+                  border: "1px dashed #27272A",
+                  backgroundColor: "#09090C",
+                  padding: "20px 24px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "14px",
+                  position: "relative",
+                  borderRadius: "6px",
+                }}
+              >
+                <input
+                  id="media-footage-upload-input"
+                  type="file"
+                  multiple
+                  accept="video/mp4,video/quicktime,video/webm"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      handleUploadFootageFiles(e.target.files);
+                    }
+                  }}
+                />
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+                    <div
+                      style={{
+                        width: "38px",
+                        height: "38px",
+                        borderRadius: "6px",
+                        backgroundColor: "#1C1C22",
+                        border: "1px solid #27272A",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#F59E0B",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <FolderUp size={18} />
+                    </div>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "13px", fontWeight: 600, color: "#F4F4F6", letterSpacing: "-0.01em" }}>
+                          INGEST RAW FOOTAGE & COMPUTER VISION ANALYSIS
+                        </span>
+                        <span className="tech-tag" style={{ color: "#06B6D4", borderColor: "rgba(6, 182, 212, 0.3)" }}>
+                          OpenCV 5.0 + FalkorDB
+                        </span>
+                      </div>
+                      <p style={{ fontSize: "11.5px", color: "#71717A", margin: "3px 0 0", lineHeight: 1.4 }}>
+                        Drag & drop video clips (.mp4, .mov, .webm) or browse files. Real frames are sampled for motion magnitude, energy level (1–5), edge density, and skin presence, then matched to StoryBeats.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById("media-footage-upload-input")?.click()}
+                      disabled={isUploadingFootage}
+                      className="btn-primary"
+                      style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <Upload size={13} />
+                      Select Video Files
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleLoadDemoFootage}
+                      disabled={isUploadingFootage}
+                      className="btn-secondary"
+                      style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <RefreshCw size={13} className={isUploadingFootage ? "spin" : ""} />
+                      Quick Ingest Demo Pack
+                    </button>
+                  </div>
+                </div>
+
+                {/* Upload & Vision Processing HUD */}
+                {isUploadingFootage && (
+                  <div
+                    style={{
+                      borderTop: "1px solid #1C1C22",
+                      paddingTop: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: "11px", color: "#F59E0B", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#F59E0B" }} />
+                        {uploadStatusText || "Processing video frames..."}
+                      </span>
+                      <span className="font-timecode" style={{ fontSize: "10px", color: "#71717A" }}>
+                        OPENCV FRAME SAMPLING
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "4px",
+                        backgroundColor: "#18181B",
+                        borderRadius: "2px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "70%",
+                          height: "100%",
+                          backgroundColor: "#F59E0B",
+                          borderRadius: "2px",
+                          animation: "pulse 1.5s infinite",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Top Filter Bar & Metadata Metrics */}
               <div
                 style={{
                   display: "flex",
@@ -1535,8 +1907,8 @@ export default function Home() {
                 <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                   {[
                     { id: "all", label: `All Clips (${sourceClips.length || 5})` },
-                    { id: "dialog", label: "Dialog / A-Roll" },
-                    { id: "broll", label: "B-Roll" },
+                    { id: "dialog", label: "Dialog / Talking Head" },
+                    { id: "broll", label: "B-Roll & Action" },
                     { id: "pacing", label: "High Pacing (4+)" },
                   ].map((filter) => {
                     const isActive = clipFilter === filter.id;
@@ -1561,18 +1933,14 @@ export default function Home() {
                   })}
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <button
-                    onClick={handleLoadDemoFootage}
-                    disabled={isLoading}
-                    className="btn-primary"
-                  >
-                    Index Sample Footage
-                  </button>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "11px", color: "#71717A" }}>
+                  <span>Indexed: <strong style={{ color: "#F4F4F6" }}>{sourceClips.length || 5} clips</strong></span>
+                  <span>•</span>
+                  <span>CV Telemetry: <strong style={{ color: "#10B981" }}>Active</strong></span>
                 </div>
               </div>
 
-              {/* 3-Column Video Contact Sheet Grid */}
+              {/* 3. 3-Column Video Contact Sheet Grid */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
                 {(sourceClips.length > 0 ? sourceClips : [
                   {
@@ -1583,15 +1951,17 @@ export default function Home() {
                     transcript: "Here is why autonomous video editing requires property graphs instead of vector search.",
                     tags: ["EXPLAINER", "HOOK", "TALKING_HEAD"],
                     energy_level: 5,
+                    edge_density: 0.05,
                   },
                   {
                     clip_id: "clip_02",
                     filename: "raw_closeup_code.mp4",
-                    shot_type: "CLOSEUP",
+                    shot_type: "CODE_SCREEN",
                     clip_duration: 2.8,
                     transcript: "Multi-hop OpenCypher query evaluating candidate video segments in sub-millisecond time.",
                     tags: ["CODE", "DEVELOPER", "CLOSEUP"],
                     energy_level: 3,
+                    edge_density: 0.14,
                   },
                   {
                     clip_id: "clip_03",
@@ -1601,6 +1971,7 @@ export default function Home() {
                     transcript: "Studio director workspace showing timeline tracks and dual monitors.",
                     tags: ["STUDIO", "HARDWARE", "BROLL"],
                     energy_level: 4,
+                    edge_density: 0.06,
                   },
                   {
                     clip_id: "clip_04",
@@ -1610,119 +1981,585 @@ export default function Home() {
                     transcript: "Dynamic cinematic camera glide across high-energy work area.",
                     tags: ["FAST", "BROLL", "CINEMATIC"],
                     energy_level: 5,
+                    edge_density: 0.05,
                   },
                   {
                     clip_id: "clip_05",
                     filename: "raw_product_demo.mp4",
-                    shot_type: "CLOSEUP",
+                    shot_type: "PRODUCT_SHOT",
                     clip_duration: 2.5,
                     transcript: "Full UI interaction demo compiling cut decision list.",
                     tags: ["DEMO", "SOFTWARE", "NLE"],
                     energy_level: 4,
+                    edge_density: 0.09,
                   },
-                ])
+                ] as unknown as VideoClip[])
                   .filter((clip) => {
-                    if (clipFilter === "dialog") return clip.shot_type === "TALKING_HEAD";
-                    if (clipFilter === "broll") return clip.shot_type === "BROLL";
+                    const st = (clip.shot_type || "").toLowerCase();
+                    if (clipFilter === "dialog") return st.includes("talking") || st.includes("head");
+                    if (clipFilter === "broll") return st.includes("broll") || st.includes("action") || st.includes("lifestyle");
                     if (clipFilter === "pacing") return clip.energy_level >= 4;
                     return true;
                   })
-                  .map((clip) => (
-                    <div
-                      key={clip.clip_id}
-                      className="studio-card"
-                      style={{
-                        padding: "0",
-                        overflow: "hidden",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "0",
-                      }}
-                    >
-                      {/* Real HTML5 Video Preview on Hover */}
+                  .map((clip) => {
+                    const videoSrc = clip.video_url || (clip.filename ? (clip.filename.startsWith("http") ? clip.filename : `http://localhost:8000/static/${clip.filename.includes("upload") ? clip.filename : "samples/" + clip.filename}`) : "");
+                    return (
                       <div
+                        key={clip.clip_id}
+                        className="studio-card"
                         style={{
-                          aspectRatio: "16/9",
-                          backgroundColor: "#050507",
-                          position: "relative",
+                          padding: "0",
                           overflow: "hidden",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0",
+                          border: "1px solid #1C1C22",
+                          transition: "border-color 0.15s ease",
                         }}
                       >
-                        <video
-                          src={`http://localhost:8000/static/samples/${clip.filename || "raw_broll_lifestyle.mp4"}#t=0.5`}
-                          muted
-                          playsInline
-                          loop
-                          onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.pause();
-                            e.currentTarget.currentTime = 0.5;
-                          }}
+                        {/* Real HTML5 Video Preview on Hover */}
+                        <div
                           style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                            display: "block",
-                            cursor: "pointer",
+                            aspectRatio: "16/9",
+                            backgroundColor: "#050507",
+                            position: "relative",
+                            overflow: "hidden",
                           }}
-                        />
+                        >
+                          <video
+                            src={`${videoSrc}#t=0.5`}
+                            muted
+                            playsInline
+                            loop
+                            onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.pause();
+                              e.currentTarget.currentTime = 0.5;
+                            }}
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              objectFit: "cover",
+                              display: "block",
+                              cursor: "pointer",
+                            }}
+                          />
 
-                        {/* Top-Left Shot Type Overlay */}
-                        <div style={{ position: "absolute", top: "8px", left: "8px", pointerEvents: "none" }}>
-                          <span className="tech-tag" style={{ backgroundColor: "rgba(12, 12, 14, 0.85)" }}>
-                            {clip.shot_type}
-                          </span>
+                          {/* Top-Left Shot Type Overlay */}
+                          <div style={{ position: "absolute", top: "8px", left: "8px", pointerEvents: "none" }}>
+                            <span className="tech-tag" style={{ backgroundColor: "rgba(12, 12, 14, 0.85)", textTransform: "uppercase" }}>
+                              {clip.shot_type}
+                            </span>
+                          </div>
+
+                          {/* Bottom-Right SMPTE Timecode */}
+                          <div style={{ position: "absolute", bottom: "8px", right: "8px", pointerEvents: "none" }}>
+                            <span className="font-timecode" style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "3px", backgroundColor: "rgba(0,0,0,0.8)", color: "#F4F4F6", border: "1px solid rgba(255,255,255,0.1)" }}>
+                              {formatSMPTE(clip.clip_duration || 3.0)}
+                            </span>
+                          </div>
                         </div>
 
-                        {/* Bottom-Right SMPTE Timecode */}
-                        <div style={{ position: "absolute", bottom: "8px", right: "8px", pointerEvents: "none" }}>
-                          <span className="font-timecode" style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "3px", backgroundColor: "rgba(0,0,0,0.8)", color: "#F4F4F6", border: "1px solid rgba(255,255,255,0.1)" }}>
-                            {formatSMPTE(clip.clip_duration || 3.0)}
-                          </span>
+                        {/* Metadata Body */}
+                        <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
+                            <span style={{ fontSize: "12.5px", fontWeight: 600, color: "#F4F4F6", letterSpacing: "-0.01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {clip.filename || clip.clip_id}
+                            </span>
+                            <span style={{ fontSize: "10px", color: "#10B981", fontFamily: "ui-monospace, monospace" }}>
+                              {clip.edge_density ? `Edges: ${clip.edge_density}` : ""}
+                            </span>
+                          </div>
+
+                          <p style={{ fontSize: "11px", color: "#71717A", margin: 0, lineHeight: 1.4, minHeight: "30px" }}>
+                            &quot;{clip.visual_summary || clip.transcript}&quot;
+                          </p>
+
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                            {clip.tags?.slice(0, 4).map((t) => (
+                              <span key={t} className="tech-tag" style={{ fontSize: "9px", padding: "1px 5px" }}>
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+
+                          {/* 5-segment horizontal pacing meter */}
+                          <div style={{ borderTop: "1px solid #1C1C22", paddingTop: "10px", marginTop: "4px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <span style={{ fontSize: "10px", color: "#71717A", fontFamily: "ui-monospace, monospace" }}>
+                              Pacing {clip.energy_level}/5
+                            </span>
+                            <div style={{ display: "flex", gap: "3px", width: "70px" }}>
+                              {[1, 2, 3, 4, 5].map((lvl) => (
+                                <div
+                                  key={lvl}
+                                  style={{
+                                    flex: 1,
+                                    height: "4px",
+                                    borderRadius: "1px",
+                                    backgroundColor: lvl <= clip.energy_level ? "#F59E0B" : "#222228",
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* AI Beat Fit Action Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleAnalyzeClipFit(clip.clip_id)}
+                            disabled={isAnalyzingFit}
+                            className="btn-secondary"
+                            style={{
+                              width: "100%",
+                              marginTop: "6px",
+                              justifyContent: "center",
+                              gap: "6px",
+                              fontSize: "11px",
+                              padding: "6px 8px",
+                            }}
+                          >
+                            <Target size={12} style={{ color: "#F59E0B" }} />
+                            Analyze StoryBeat Fit
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              {/* 4. AI StoryBeat Fit Recommender Modal Overlay */}
+              {selectedClipFitAnalysis && (
+                <div
+                  style={{
+                    position: "fixed",
+                    inset: 0,
+                    zIndex: 100,
+                    backgroundColor: "rgba(0, 0, 0, 0.85)",
+                    backdropFilter: "blur(6px)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "20px",
+                  }}
+                  onClick={() => setSelectedClipFitAnalysis(null)}
+                >
+                  <div
+                    className="studio-card"
+                    style={{
+                      width: "920px",
+                      maxWidth: "96vw",
+                      maxHeight: "90vh",
+                      backgroundColor: "#0D0D11",
+                      border: "1px solid #27272A",
+                      borderRadius: "8px",
+                      padding: "0",
+                      overflow: "hidden",
+                      display: "flex",
+                      flexDirection: "column",
+                      boxShadow: "0 25px 50px -12px rgba(0,0,0,0.85)",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Modal Header */}
+                    <div
+                      style={{
+                        padding: "16px 20px",
+                        borderBottom: "1px solid #1C1C22",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        backgroundColor: "#111116",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div
+                          style={{
+                            width: "30px",
+                            height: "30px",
+                            borderRadius: "5px",
+                            backgroundColor: "#1C1C22",
+                            border: "1px solid #27272A",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#F59E0B",
+                          }}
+                        >
+                          <Target size={16} />
+                        </div>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ fontSize: "13.5px", fontWeight: 600, color: "#F4F4F6", letterSpacing: "-0.01em" }}>
+                              AI STORYBEAT FIT RECOMMENDER
+                            </span>
+                            <span className="tech-tag" style={{ textTransform: "uppercase" }}>
+                              {selectedClipFitAnalysis.shot_type}
+                            </span>
+                          </div>
+                          <p style={{ fontSize: "11px", color: "#71717A", margin: "2px 0 0" }}>
+                            Clip: <strong style={{ color: "#A1A1AA" }}>{selectedClipFitAnalysis.filename}</strong> ({selectedClipFitAnalysis.duration.toFixed(1)}s, Energy {selectedClipFitAnalysis.energy_level}/5)
+                          </p>
                         </div>
                       </div>
 
-                      {/* Metadata Body */}
-                      <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <span style={{ fontSize: "12.5px", fontWeight: 600, color: "#F4F4F6", letterSpacing: "-0.01em" }}>
-                          {clip.filename}
-                        </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedClipFitAnalysis(null)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#71717A",
+                          cursor: "pointer",
+                          padding: "4px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: "4px",
+                        }}
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
 
-                        <p style={{ fontSize: "11px", color: "#71717A", margin: 0, lineHeight: 1.4, minHeight: "30px" }}>
-                          &quot;{clip.transcript}&quot;
-                        </p>
-
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                          {clip.tags?.map((t) => (
-                            <span key={t} className="tech-tag" style={{ fontSize: "9px", padding: "1px 5px" }}>
-                              {t}
-                            </span>
-                          ))}
+                    {/* Modal Body: Two Columns */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1.35fr",
+                        gap: "0",
+                        overflowY: "auto",
+                        maxHeight: "calc(90vh - 70px)",
+                      }}
+                    >
+                      {/* Left: Video & Telemetry */}
+                      <div
+                        style={{
+                          padding: "20px",
+                          borderRight: "1px solid #1C1C22",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "14px",
+                          backgroundColor: "#0A0A0D",
+                        }}
+                      >
+                        {/* Video Player */}
+                        <div
+                          style={{
+                            aspectRatio: "16/9",
+                            backgroundColor: "#000",
+                            borderRadius: "5px",
+                            overflow: "hidden",
+                            position: "relative",
+                            border: "1px solid #222228",
+                          }}
+                        >
+                          <video
+                            src={`http://localhost:8000/static/${selectedClipFitAnalysis.filename.includes("upload") ? selectedClipFitAnalysis.filename : "samples/" + selectedClipFitAnalysis.filename}`}
+                            controls
+                            autoPlay
+                            loop
+                            muted
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
                         </div>
 
-                        {/* 5-segment horizontal pacing meter */}
-                        <div style={{ borderTop: "1px solid #1C1C22", paddingTop: "10px", marginTop: "4px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <span style={{ fontSize: "10px", color: "#71717A", fontFamily: "ui-monospace, monospace" }}>
-                            Pacing {clip.energy_level}/5
-                          </span>
-                          <div style={{ display: "flex", gap: "3px", width: "70px" }}>
-                            {[1, 2, 3, 4, 5].map((lvl) => (
-                              <div
-                                key={lvl}
-                                style={{
-                                  flex: 1,
-                                  height: "4px",
-                                  borderRadius: "1px",
-                                  backgroundColor: lvl <= clip.energy_level ? "#F59E0B" : "#222228",
-                                }}
-                              />
+                        {/* Computer Vision Telemetry Card */}
+                        <div
+                          style={{
+                            backgroundColor: "#121216",
+                            border: "1px solid #1C1C22",
+                            borderRadius: "5px",
+                            padding: "12px 14px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "8px",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <span style={{ fontSize: "10.5px", fontWeight: 600, color: "#A1A1AA", letterSpacing: "0.04em" }}>
+                              OPENCV COMPUTER VISION TELEMETRY
+                            </span>
+                            <span style={{ fontSize: "9.5px", color: "#10B981", fontFamily: "ui-monospace, monospace" }}>
+                              CALIBRATED
+                            </span>
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px", marginTop: "2px" }}>
+                            <div style={{ backgroundColor: "#18181D", padding: "6px 8px", borderRadius: "4px" }}>
+                              <div style={{ fontSize: "9.5px", color: "#71717A" }}>Detected Shot Type</div>
+                              <div style={{ fontSize: "11.5px", fontWeight: 600, color: "#F4F4F6", textTransform: "capitalize" }}>
+                                {selectedClipFitAnalysis.shot_type.replace("_", " ")}
+                              </div>
+                            </div>
+                            <div style={{ backgroundColor: "#18181D", padding: "6px 8px", borderRadius: "4px" }}>
+                              <div style={{ fontSize: "9.5px", color: "#71717A" }}>Visual Pacing / Energy</div>
+                              <div style={{ fontSize: "11.5px", fontWeight: 600, color: "#F59E0B" }}>
+                                Level {selectedClipFitAnalysis.energy_level}/5
+                              </div>
+                            </div>
+                            <div style={{ backgroundColor: "#18181D", padding: "6px 8px", borderRadius: "4px" }}>
+                              <div style={{ fontSize: "9.5px", color: "#71717A" }}>Motion Score</div>
+                              <div style={{ fontSize: "11.5px", fontWeight: 600, color: "#06B6D4", fontFamily: "ui-monospace, monospace" }}>
+                                {selectedClipFitAnalysis.motion_score.toFixed(2)}
+                              </div>
+                            </div>
+                            <div style={{ backgroundColor: "#18181D", padding: "6px 8px", borderRadius: "4px" }}>
+                              <div style={{ fontSize: "9.5px", color: "#71717A" }}>Edge Density</div>
+                              <div style={{ fontSize: "11.5px", fontWeight: 600, color: "#8B5CF6", fontFamily: "ui-monospace, monospace" }}>
+                                {selectedClipFitAnalysis.edge_density || 0.08}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ fontSize: "10.5px", color: "#71717A", marginTop: "4px", lineHeight: 1.4 }}>
+                            {selectedClipFitAnalysis.visual_summary}
+                          </div>
+
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "4px" }}>
+                            {selectedClipFitAnalysis.tags?.map((t) => (
+                              <span key={t} className="tech-tag" style={{ fontSize: "9px", padding: "1px 5px" }}>
+                                {t}
+                              </span>
                             ))}
                           </div>
                         </div>
                       </div>
+
+                      {/* Right: Ranked Beat Recommendations */}
+                      <div
+                        style={{
+                          padding: "20px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "14px",
+                          backgroundColor: "#0D0D11",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#A1A1AA", letterSpacing: "0.04em" }}>
+                            NARRATIVE STORYBEAT COMPATIBILITY RANKING
+                          </span>
+                          <span style={{ fontSize: "10px", color: "#71717A" }}>
+                            {selectedClipFitAnalysis.ranked_recommendations?.length || 4} Beats Evaluated
+                          </span>
+                        </div>
+
+                        {/* Hero Card: #1 Best Fit */}
+                        {selectedClipFitAnalysis.best_fit_beat && (
+                          <div
+                            style={{
+                              backgroundColor: "#131318",
+                              border: "1px solid #F59E0B",
+                              borderRadius: "6px",
+                              padding: "16px",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "10px",
+                              boxShadow: "0 4px 20px rgba(245, 158, 11, 0.08)",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <span
+                                style={{
+                                  fontSize: "10px",
+                                  fontWeight: 700,
+                                  color: "#09090B",
+                                  backgroundColor: "#F59E0B",
+                                  padding: "2px 7px",
+                                  borderRadius: "3px",
+                                  letterSpacing: "0.03em",
+                                }}
+                              >
+                                #1 BEST FIT RECOMMENDATION
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: "10px",
+                                  fontWeight: 600,
+                                  color: "#10B981",
+                                  backgroundColor: "rgba(16, 185, 129, 0.12)",
+                                  border: "1px solid rgba(16, 185, 129, 0.3)",
+                                  padding: "2px 6px",
+                                  borderRadius: "3px",
+                                }}
+                              >
+                                {selectedClipFitAnalysis.best_fit_beat.recommendation_tier}
+                              </span>
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                              <div>
+                                <span style={{ fontSize: "15px", fontWeight: 700, color: "#F4F4F6" }}>
+                                  Beat {selectedClipFitAnalysis.best_fit_beat.beat_index} — {selectedClipFitAnalysis.best_fit_beat.role_label}
+                                </span>
+                                <div style={{ fontSize: "11px", color: "#71717A", marginTop: "2px" }}>
+                                  Target Duration: {selectedClipFitAnalysis.best_fit_beat.target_duration}s • Required Framing: {selectedClipFitAnalysis.best_fit_beat.required_shot_type}
+                                </div>
+                              </div>
+                              <span
+                                style={{
+                                  fontSize: "20px",
+                                  fontWeight: 800,
+                                  color: "#F59E0B",
+                                  fontFamily: "ui-monospace, monospace",
+                                }}
+                              >
+                                {selectedClipFitAnalysis.best_fit_beat.fit_percentage}%
+                              </span>
+                            </div>
+
+                            {/* Explainable Rationale */}
+                            <p
+                              style={{
+                                fontSize: "11.5px",
+                                color: "#D4D4D8",
+                                lineHeight: 1.45,
+                                margin: "2px 0",
+                                backgroundColor: "#18181E",
+                                padding: "8px 10px",
+                                borderRadius: "4px",
+                                borderLeft: "2px solid #F59E0B",
+                              }}
+                            >
+                              &quot;{selectedClipFitAnalysis.best_fit_beat.rationale}&quot;
+                            </p>
+
+                            {/* Breakdown Pills */}
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "10px" }}>
+                              <span className="tech-tag">Shot Type: {selectedClipFitAnalysis.best_fit_beat.breakdown.shot_type_score}/40</span>
+                              <span className="tech-tag">Pacing: {selectedClipFitAnalysis.best_fit_beat.breakdown.energy_score}/25</span>
+                              <span className="tech-tag">Duration: {selectedClipFitAnalysis.best_fit_beat.breakdown.duration_score}/15</span>
+                              {selectedClipFitAnalysis.best_fit_beat.breakdown.preference_bonus !== 0 && (
+                                <span className="tech-tag" style={{ color: selectedClipFitAnalysis.best_fit_beat.breakdown.preference_bonus > 0 ? "#10B981" : "#EF4444" }}>
+                                  Taste Bonus: {selectedClipFitAnalysis.best_fit_beat.breakdown.preference_bonus > 0 ? "+" : ""}{selectedClipFitAnalysis.best_fit_beat.breakdown.preference_bonus}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Assign Action Button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleAssignClipToBeat(
+                                  selectedClipFitAnalysis.clip_id,
+                                  selectedClipFitAnalysis.best_fit_beat.beat_index,
+                                  selectedClipFitAnalysis.best_fit_beat.beat_id
+                                );
+                              }}
+                              disabled={isAssigningClip}
+                              className="btn-primary"
+                              style={{
+                                marginTop: "4px",
+                                justifyContent: "center",
+                                gap: "8px",
+                                fontWeight: 600,
+                                fontSize: "12px",
+                                padding: "8px 12px",
+                              }}
+                            >
+                              <Check size={14} />
+                              {isAssigningClip ? "Synthesizing New Timeline Edit..." : `Assign to Timeline as Beat ${selectedClipFitAnalysis.best_fit_beat.beat_index}`}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Alternative StoryBeats List */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
+                          <span style={{ fontSize: "10.5px", color: "#71717A", fontWeight: 600 }}>
+                            ALTERNATIVE STORYBEAT MATCHES
+                          </span>
+                          {selectedClipFitAnalysis.ranked_recommendations?.slice(1).map((rec) => (
+                            <div
+                              key={rec.beat_id}
+                              style={{
+                                backgroundColor: "#111115",
+                                border: "1px solid #1C1C22",
+                                borderRadius: "5px",
+                                padding: "10px 12px",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "6px",
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                  <span style={{ fontSize: "10.5px", fontWeight: 600, color: "#71717A", fontFamily: "ui-monospace, monospace" }}>
+                                    #{rec.rank}
+                                  </span>
+                                  <span style={{ fontSize: "12px", fontWeight: 600, color: "#F4F4F6" }}>
+                                    Beat {rec.beat_index}: {rec.role_label}
+                                  </span>
+                                  <span
+                                    className="tech-tag"
+                                    style={{
+                                      fontSize: "8.5px",
+                                      padding: "1px 4px",
+                                      color: rec.recommendation_tier === "STRONG FIT" ? "#06B6D4" : rec.recommendation_tier === "ALTERNATIVE FIT" ? "#A1A1AA" : "#EF4444",
+                                    }}
+                                  >
+                                    {rec.recommendation_tier}
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: "13px", fontWeight: 700, color: "#A1A1AA", fontFamily: "ui-monospace, monospace" }}>
+                                  {rec.fit_percentage}%
+                                </span>
+                              </div>
+
+                              <div style={{ fontSize: "10.5px", color: "#71717A", lineHeight: 1.35 }}>
+                                {rec.rationale}
+                              </div>
+
+                              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "2px" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAssignClipToBeat(selectedClipFitAnalysis.clip_id, rec.beat_index, rec.beat_id)}
+                                  disabled={isAssigningClip}
+                                  className="btn-secondary"
+                                  style={{ fontSize: "10.5px", padding: "4px 8px", gap: "4px" }}
+                                >
+                                  Assign to Beat {rec.beat_index}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  ))}
-              </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 5. Notification Toast HUD */}
+              {toastNotice && (
+                <div
+                  style={{
+                    position: "fixed",
+                    bottom: "24px",
+                    right: "24px",
+                    zIndex: 200,
+                    backgroundColor: "#121217",
+                    border: "1px solid #10B981",
+                    borderRadius: "6px",
+                    padding: "12px 16px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
+                  }}
+                >
+                  <CheckCircle2 size={16} style={{ color: "#10B981", flexShrink: 0 }} />
+                  <span style={{ fontSize: "12px", color: "#F4F4F6", fontWeight: 500 }}>
+                    {toastNotice}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setToastNotice(null)}
+                    style={{ background: "none", border: "none", color: "#71717A", cursor: "pointer", padding: "2px" }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1766,8 +2603,42 @@ export default function Home() {
                         </span>
                       </div>
 
-                      {/* Guide Overlay Toggles */}
+                      {/* Hidden upload input for studio editor */}
+                      <input
+                        id="studio-footage-upload-input"
+                        type="file"
+                        multiple
+                        accept="video/mp4,video/quicktime,video/webm"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files.length > 0) {
+                            handleUploadFootageFiles(e.target.files);
+                          }
+                        }}
+                      />
+
+                      {/* Guide Overlay Toggles & In-Studio Footage Upload */}
                       <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById("studio-footage-upload-input")?.click()}
+                          disabled={isUploadingFootage}
+                          className="btn-secondary"
+                          style={{
+                            padding: "3px 8px",
+                            fontSize: "10px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            color: "#F59E0B",
+                            borderColor: "rgba(245, 158, 11, 0.3)",
+                          }}
+                          title="Upload video clips to this project without leaving the editor"
+                        >
+                          <Upload size={11} />
+                          <span>{isUploadingFootage ? "Ingesting..." : "+ Add Footage"}</span>
+                        </button>
+
                         <button
                           onClick={() => setShowGridOverlay(!showGridOverlay)}
                           style={{
@@ -1799,8 +2670,19 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {/* Video Stage Frame */}
+                    {/* Video Stage Frame with Direct Drag & Drop Footage Ingest */}
                     <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                          handleUploadFootageFiles(e.dataTransfer.files);
+                        }
+                      }}
                       style={{
                         flex: 1,
                         backgroundColor: "#050507",
@@ -1812,6 +2694,33 @@ export default function Home() {
                         minHeight: "220px",
                       }}
                     >
+                      {/* In-Studio Uploading Overlay */}
+                      {isUploadingFootage && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            backgroundColor: "rgba(9, 9, 11, 0.88)",
+                            backdropFilter: "blur(4px)",
+                            zIndex: 35,
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: "10px",
+                            padding: "20px",
+                            textAlign: "center",
+                          }}
+                        >
+                          <RefreshCw size={24} className="spin" style={{ color: "#F59E0B" }} />
+                          <span style={{ fontSize: "12px", color: "#F4F4F6", fontWeight: 600 }}>
+                            {uploadStatusText || "Ingesting & Analyzing Video Footage with OpenCV..."}
+                          </span>
+                          <span className="font-timecode" style={{ fontSize: "10px", color: "#A1A1AA" }}>
+                            OPENCV FRAME SAMPLING • FALKORDB BEAT FIT • EDIT SYNTHESIS
+                          </span>
+                        </div>
+                      )}
                       {/* Safe Zone Overlay */}
                       {showSafeZone && (
                         <div
@@ -1948,6 +2857,8 @@ export default function Home() {
                       onRefreshGraph={() => {
                         if (activeProject) refreshGraphState(activeProject.id);
                       }}
+                      onSubmitFeedback={handleSubmitFeedback}
+                      isSubmittingFeedback={isSubmittingFeedback}
                     />
                   </div>
                 </div>
@@ -1975,6 +2886,7 @@ export default function Home() {
                   isRevising={isRevising}
                   activeVersionNum={versions.length > 0 ? versions[versions.length - 1].version_num : 1}
                   creatorPreferences={preferences}
+                  initialBriefing={directorBriefing}
                 />
               </div>
             </div>
@@ -2386,22 +3298,72 @@ export default function Home() {
 
               {/* Persistent Creator Preferences Table */}
               <div className="studio-card" style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "20px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
                   <div>
                     <span style={{ fontSize: "10px", fontFamily: "ui-monospace, monospace", color: "#F59E0B", fontWeight: 600, letterSpacing: "0.06em" }}>
-                      PERSISTENT MEMORY // TRACK 02
+                      PERSISTENT MEMORY & TASTE LEARNING // TRACK 02
                     </span>
                     <h2 style={{ fontSize: "15px", fontWeight: 700, color: "#F4F4F6", margin: "4px 0 2px 0" }}>
                       Creator Preference Nodes (:CreatorPreference)
                     </h2>
                     <p style={{ fontSize: "12px", color: "#8E8E98", margin: 0 }}>
-                      Learned procedural and aesthetic rules stored directly in FalkorDB that survive across sessions and projects.
+                      Mined procedural rules and aesthetic preferences stored in FalkorDB that continuously refine clip rankings.
                     </p>
                   </div>
-                  <span className="tech-tag-amber">
-                    {preferences.length} Stored Rules
-                  </span>
+                  
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button
+                      onClick={handleTriggerTasteLearning}
+                      disabled={isLearningTaste}
+                      className="btn-studio btn-studio-primary"
+                      style={{ height: "30px", fontSize: "11px", padding: "0 12px", display: "flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <Activity className={`w-3 h-3 ${isLearningTaste ? "animate-spin" : ""}`} />
+                      <span>{isLearningTaste ? "Mining Choices..." : "Mine & Learn Taste"}</span>
+                    </button>
+                    <span className="tech-tag-amber">
+                      {preferences.length} Stored Rules
+                    </span>
+                  </div>
                 </div>
+
+                {/* Feedback Analytics Summary Bar */}
+                {feedbackSummary && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", backgroundColor: "#0C0C0E", padding: "12px", borderRadius: "5px", border: "1px solid #1F1F26" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span style={{ fontSize: "9px", fontFamily: "ui-monospace, monospace", color: "#71717A", textTransform: "uppercase" }}>
+                        Recorded Feedback
+                      </span>
+                      <span style={{ fontSize: "16px", fontWeight: 700, color: "#F4F4F6", fontFamily: "ui-monospace, monospace" }}>
+                        {feedbackSummary.total_feedback} Choices
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span style={{ fontSize: "9px", fontFamily: "ui-monospace, monospace", color: "#71717A", textTransform: "uppercase" }}>
+                        Approved / Kept
+                      </span>
+                      <span style={{ fontSize: "16px", fontWeight: 700, color: "#10B981", fontFamily: "ui-monospace, monospace" }}>
+                        {feedbackSummary.keeps} Cuts
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span style={{ fontSize: "9px", fontFamily: "ui-monospace, monospace", color: "#71717A", textTransform: "uppercase" }}>
+                        Replaced / Swapped
+                      </span>
+                      <span style={{ fontSize: "16px", fontWeight: 700, color: "#F59E0B", fontFamily: "ui-monospace, monospace" }}>
+                        {feedbackSummary.replaces} Cuts
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span style={{ fontSize: "9px", fontFamily: "ui-monospace, monospace", color: "#71717A", textTransform: "uppercase" }}>
+                        Approval Rate
+                      </span>
+                      <span style={{ fontSize: "16px", fontWeight: 700, color: "#06B6D4", fontFamily: "ui-monospace, monospace" }}>
+                        {feedbackSummary.approval_rate}%
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Data Table */}
                 <div style={{ border: "1px solid #1F1F26", borderRadius: "5px", overflow: "hidden" }}>

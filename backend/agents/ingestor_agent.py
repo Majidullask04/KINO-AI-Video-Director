@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 
 from backend.graph.client import db
 from backend.video.renderer import detect_scenes
+from backend.video.analyzer import visual_analyzer
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,27 @@ class IngestorAgent:
     """
     Ingests and analyzes reference videos and raw footage into FalkorDB property graph nodes and edges.
     """
+
+    def ensure_project_beats(self, project_id: str) -> List[Dict[str, Any]]:
+        """
+        Ensures a Project has a sequential StoryBeat chain in FalkorDB.
+        If no reference beats exist, creates a standard 4-beat cinematic narrative structure.
+        """
+        check_cypher = """
+        MATCH (p:Project {id: $project_id})-[:USES_REFERENCE]->(r:ReferenceVideo)-[:HAS_BEAT]->(b:StoryBeat)
+        RETURN count(b) AS beat_count
+        """
+        res = db.query_as_dicts(check_cypher, {"project_id": project_id})
+        if res and res[0].get("beat_count", 0) > 0:
+            from backend.graph.queries import get_reference_beats
+            return get_reference_beats(project_id)
+
+        # Create standard reference beats for the project
+        return self.analyze_and_index_reference_video(
+            project_id=project_id,
+            video_path_or_url="standard_narrative_pacing",
+            source_type="standard_template"
+        ).get("beats", [])
 
     def analyze_and_index_reference_video(
         self,
@@ -222,8 +244,7 @@ class IngestorAgent:
             "fps": fps
         })
 
-        # Infer shot characteristics based on filename heuristics
-        shot_heuristics = self._infer_asset_metadata(filename)
+        # Give it eyes: analyze actual video clips using computer vision
         prev_clip_id = None
         created_clips = []
 
@@ -233,10 +254,23 @@ class IngestorAgent:
             out_sec = float(cut["end_sec"])
             duration = float(cut["duration"])
             
-            shot_type = shot_heuristics["shot_type"]
-            energy_level = shot_heuristics["energy_level"]
-            motion_score = shot_heuristics["motion_score"]
-            transcript = shot_heuristics["transcript"]
+            # Extract real visual metrics from actual video frames
+            visual_data = visual_analyzer.analyze_clip_visuals(
+                filepath=filepath,
+                in_sec=in_sec,
+                out_sec=out_sec
+            )
+            
+            shot_type = visual_data["shot_type"]
+            energy_level = visual_data["energy_level"]
+            motion_score = visual_data["motion_score"]
+            edge_density = visual_data.get("edge_density", 1.8)
+            brightness = visual_data.get("brightness", 50.0)
+            contrast = visual_data.get("contrast", 18.0)
+            visual_summary = visual_data.get("visual_summary", f"Visual analysis: {shot_type} cut")
+            transcript = visual_data.get("transcript", visual_summary)
+            tags = visual_data.get("tags", [shot_type])
+            mood = visual_data.get("mood", "upbeat")
 
             create_clip_cypher = """
             MATCH (sa:SourceAsset {id: $asset_id})
@@ -248,7 +282,14 @@ class IngestorAgent:
                 shot_type: $shot_type,
                 energy_level: $energy_level,
                 motion_score: $motion_score,
-                transcript: $transcript
+                edge_density: $edge_density,
+                brightness: $brightness,
+                contrast: $contrast,
+                visual_summary: $visual_summary,
+                transcript: $transcript,
+                keep_count: 0,
+                replace_count: 0,
+                reject_count: 0
             })
             CREATE (sa)-[:CONTAINS_CLIP {clip_index: $clip_index}]->(c)
             RETURN c.id AS id
@@ -262,12 +303,16 @@ class IngestorAgent:
                 "shot_type": shot_type,
                 "energy_level": energy_level,
                 "motion_score": motion_score,
+                "edge_density": edge_density,
+                "brightness": brightness,
+                "contrast": contrast,
+                "visual_summary": visual_summary,
                 "transcript": transcript,
                 "clip_index": idx + 1
             })
 
-            # Connect VisualTags
-            for tag in shot_heuristics["tags"]:
+            # Connect VisualTags derived from real vision analysis
+            for tag in tags:
                 tag_cypher = """
                 MATCH (c:VideoClip {id: $clip_id})
                 MERGE (t:VisualTag {name: $tag_name})
@@ -281,7 +326,7 @@ class IngestorAgent:
             MERGE (m:AudioMood {name: $mood_name})
             MERGE (c)-[:HAS_MOOD {confidence: 0.90}]->(m)
             """
-            db.query(mood_cypher, {"clip_id": clip_id, "mood_name": shot_heuristics["mood"]})
+            db.query(mood_cypher, {"clip_id": clip_id, "mood_name": mood})
 
             # Connect NEXT_CLIP_IN_SOURCE
             if prev_clip_id:
@@ -299,9 +344,12 @@ class IngestorAgent:
                 "duration": duration,
                 "shot_type": shot_type,
                 "energy_level": energy_level,
-                "tags": shot_heuristics["tags"]
+                "motion_score": motion_score,
+                "visual_summary": visual_summary,
+                "tags": tags
             })
 
+        logger.info(f"Ingested {len(created_clips)} clips for {filename} with real computer vision analysis.")
         return {
             "asset_id": asset_id,
             "filename": filename,
@@ -309,53 +357,13 @@ class IngestorAgent:
             "clips": created_clips
         }
 
-    def _infer_asset_metadata(self, filename: str) -> Dict[str, Any]:
-        """Derives rich multimodal metadata tags from filename or asset content."""
-        fn = filename.lower()
-        if "hook" in fn or "talking" in fn:
-            return {
-                "shot_type": "talking_head",
-                "energy_level": 5,
-                "motion_score": 0.85,
-                "transcript": "Stop wasting hours manually cutting video footage...",
-                "tags": ["talking_head", "closeup", "hook"],
-                "mood": "upbeat"
-            }
-        elif "code" in fn or "closeup" in fn:
-            return {
-                "shot_type": "closeup",
-                "energy_level": 3,
-                "motion_score": 0.40,
-                "transcript": "Traversing the multi-hop FalkorDB knowledge graph...",
-                "tags": ["closeup", "screen", "explainer"],
-                "mood": "dramatic"
-            }
-        elif "demo" in fn or "product" in fn:
-            return {
-                "shot_type": "product_shot",
-                "energy_level": 4,
-                "motion_score": 0.70,
-                "transcript": "Watch the multi-agent director synthesize the timeline...",
-                "tags": ["product_shot", "demo", "screen"],
-                "mood": "upbeat"
-            }
-        elif "energetic" in fn or "fast" in fn:
-            return {
-                "shot_type": "broll",
-                "energy_level": 5,
-                "motion_score": 0.95,
-                "transcript": "Instant real-time revision with zero hallucinations.",
-                "tags": ["broll", "outdoor", "lifestyle"],
-                "mood": "upbeat"
-            }
-        else:
-            return {
-                "shot_type": "broll",
-                "energy_level": 3,
-                "motion_score": 0.50,
-                "transcript": "Professional studio production quality guaranteed.",
-                "tags": ["broll", "lifestyle", "explainer"],
-                "mood": "calm"
-            }
+    def _infer_asset_metadata(self, filename: str, filepath: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Analyzes actual footage frames when filepath is provided,
+        or uses computer vision fallback heuristics when only filename is known.
+        """
+        if filepath and os.path.exists(filepath):
+            return visual_analyzer.analyze_clip_visuals(filepath)
+        return visual_analyzer._fallback_visual_analysis(filename)
 
 ingestor = IngestorAgent()

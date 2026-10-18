@@ -3,8 +3,13 @@ Core FalkorDB Cypher queries for AI Video Director.
 Includes all 5 required submission queries as documented in Rule 10 of Graph Hacks.
 """
 
+import uuid
+import time
+import logging
 from typing import Any, Dict, List, Optional
 from backend.graph.client import db
+
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
 # 1. QUERY 1: Multi-Hop Beat-to-Clip Candidate Matching (Director Agent)
@@ -19,9 +24,12 @@ WITH b, c, sa,
      collect(t.name) AS matched_tags,
      sum(ht.confidence) AS tag_score,
      abs(c.energy_level - b.energy_level) AS energy_diff,
-     CASE WHEN m IS NOT NULL THEN 1.5 ELSE 0.0 END AS mood_bonus
-WITH b, c, sa, matched_tags,
-     (tag_score * 2.0 + mood_bonus - (energy_diff * 0.5)) AS total_match_score
+     CASE WHEN m IS NOT NULL THEN 1.5 ELSE 0.0 END AS mood_bonus,
+     coalesce(c.keep_count, 0) AS keeps,
+     coalesce(c.replace_count, 0) AS replaces,
+     coalesce(c.reject_count, 0) AS rejects
+WITH b, c, sa, matched_tags, keeps, replaces, rejects,
+     (tag_score * 2.0 + mood_bonus - (energy_diff * 0.5) + (keeps * 1.5) - (replaces * 1.0) - (rejects * 2.5)) AS total_match_score
 ORDER BY b.beat_index ASC, total_match_score DESC
 RETURN b.id AS beat_id,
        b.beat_index AS beat_index,
@@ -33,6 +41,12 @@ RETURN b.id AS beat_id,
        c.out_sec AS clip_out_sec,
        c.shot_type AS shot_type,
        c.energy_level AS clip_energy_level,
+       coalesce(c.motion_score, 0.5) AS motion_score,
+       coalesce(c.edge_density, 1.8) AS edge_density,
+       coalesce(c.visual_summary, '') AS visual_summary,
+       keeps AS keep_count,
+       replaces AS replace_count,
+       rejects AS reject_count,
        matched_tags,
        total_match_score
 """
@@ -49,9 +63,12 @@ WITH b, c, sa,
      collect(DISTINCT t.name) AS matched_tags,
      coalesce(sum(ht.confidence), 0.5) AS tag_score,
      abs(c.energy_level - b.energy_level) AS energy_diff,
-     CASE WHEN m IS NOT NULL THEN 1.5 ELSE 0.0 END AS mood_bonus
-WITH b, c, sa, matched_tags,
-     (tag_score * 2.0 + mood_bonus - (energy_diff * 0.5)) AS total_match_score
+     CASE WHEN m IS NOT NULL THEN 1.5 ELSE 0.0 END AS mood_bonus,
+     coalesce(c.keep_count, 0) AS keeps,
+     coalesce(c.replace_count, 0) AS replaces,
+     coalesce(c.reject_count, 0) AS rejects
+WITH b, c, sa, matched_tags, keeps, replaces, rejects,
+     (tag_score * 2.0 + mood_bonus - (energy_diff * 0.5) + (keeps * 1.5) - (replaces * 1.0) - (rejects * 2.5)) AS total_match_score
 ORDER BY b.beat_index ASC, total_match_score DESC
 RETURN b.id AS beat_id,
        b.beat_index AS beat_index,
@@ -63,6 +80,12 @@ RETURN b.id AS beat_id,
        c.out_sec AS clip_out_sec,
        c.shot_type AS shot_type,
        c.energy_level AS clip_energy_level,
+       coalesce(c.motion_score, 0.5) AS motion_score,
+       coalesce(c.edge_density, 1.8) AS edge_density,
+       coalesce(c.visual_summary, '') AS visual_summary,
+       keeps AS keep_count,
+       replaces AS replace_count,
+       rejects AS reject_count,
        matched_tags,
        total_match_score
 """
@@ -332,7 +355,14 @@ def get_source_assets_and_clips(project_id: str) -> List[Dict[str, Any]]:
            c.shot_type AS shot_type,
            c.energy_level AS energy_level,
            c.motion_score AS motion_score,
+           c.edge_density AS edge_density,
+           c.brightness AS brightness,
+           c.contrast AS contrast,
+           c.visual_summary AS visual_summary,
            c.transcript AS transcript,
+           coalesce(c.keep_count, 0) AS keep_count,
+           coalesce(c.replace_count, 0) AS replace_count,
+           coalesce(c.reject_count, 0) AS reject_count,
            tags,
            mood
     ORDER BY sa.filename ASC, c.in_sec ASC
@@ -407,3 +437,291 @@ def get_full_project_graph_state(project_id: str) -> Dict[str, Any]:
         "edges": edges,
         "query_logs": db.get_query_logs(10)
     }
+
+# ----------------------------------------------------------------------
+# 6. Feedback & Taste Learning Engine (Requirements 3 & 4)
+# ----------------------------------------------------------------------
+
+def record_clip_feedback(
+    creator_id: str,
+    project_id: str,
+    clip_id: str,
+    beat_id: str,
+    action: str,  # 'keep', 'replace', or 'reject'
+    decision_id: Optional[str] = None,
+    version_id: Optional[str] = None,
+    reason: Optional[str] = "",
+    rating: Optional[float] = None
+) -> Dict[str, Any]:
+    """
+    Records customer feedback ('keep', 'replace', 'reject') in FalkorDB.
+    Creates (:Feedback) node, links to Creator, VideoClip, StoryBeat,
+    updates clip counters, and if replaced/rejected, links [:REJECTED_FOR].
+    """
+    fb_id = f"fb_{uuid.uuid4().hex[:8]}"
+    created_at = int(time.time() * 1000)
+
+    # 1. Fetch clip and beat context
+    info_cypher = """
+    MATCH (c:VideoClip {id: $clip_id})
+    OPTIONAL MATCH (b:StoryBeat {id: $beat_id})
+    OPTIONAL MATCH (c)-[:HAS_TAG]->(t:VisualTag)
+    RETURN c.shot_type AS shot_type,
+           c.energy_level AS energy_level,
+           b.role AS beat_role,
+           collect(DISTINCT t.name) AS tags
+    """
+    info = db.query_as_dicts(info_cypher, {"clip_id": clip_id, "beat_id": beat_id})
+    shot_type = info[0]["shot_type"] if info and info[0].get("shot_type") else "broll"
+    energy_level = info[0]["energy_level"] if info and info[0].get("energy_level") else 3
+    beat_role = info[0]["beat_role"] if info and info[0].get("beat_role") else "generic"
+    tags = info[0]["tags"] if info and info[0].get("tags") else []
+
+    # Default rating based on action
+    if rating is None:
+        rating = 5.0 if action == "keep" else (2.5 if action == "replace" else 1.0)
+
+    # 2. Create Feedback Node and link
+    create_fb_cypher = """
+    MERGE (cr:Creator {id: $creator_id})
+    CREATE (fb:Feedback {
+        id: $fb_id,
+        action: $action,
+        decision_id: $decision_id,
+        beat_id: $beat_id,
+        beat_role: $beat_role,
+        clip_id: $clip_id,
+        shot_type: $shot_type,
+        energy_level: $energy_level,
+        reason: $reason,
+        rating: $rating,
+        created_at: $created_at
+    })
+    CREATE (cr)-[:RECORDED_FEEDBACK {created_at: $created_at}]->(fb)
+    WITH fb
+    OPTIONAL MATCH (c:VideoClip {id: $clip_id})
+    FOREACH (_ IN CASE WHEN c IS NOT NULL THEN [1] ELSE [] END |
+        CREATE (fb)-[:EVALUATES_CLIP {action: $action}]->(c)
+    )
+    WITH fb
+    OPTIONAL MATCH (b:StoryBeat {id: $beat_id})
+    FOREACH (_ IN CASE WHEN b IS NOT NULL THEN [1] ELSE [] END |
+        CREATE (fb)-[:FOR_BEAT {role: $beat_role}]->(b)
+    )
+    RETURN fb.id AS id
+    """
+    db.query(create_fb_cypher, {
+        "creator_id": creator_id,
+        "clip_id": clip_id,
+        "beat_id": beat_id,
+        "fb_id": fb_id,
+        "action": action,
+        "decision_id": decision_id or "",
+        "beat_role": beat_role,
+        "shot_type": shot_type,
+        "energy_level": energy_level,
+        "reason": reason or f"Customer marked suggestion as {action}",
+        "rating": rating,
+        "created_at": created_at
+    })
+
+    # 3. Update VideoClip counters and negative memory if rejected/replaced
+    if action == "keep":
+        update_clip_cypher = """
+        MATCH (c:VideoClip {id: $clip_id})
+        SET c.keep_count = coalesce(c.keep_count, 0) + 1
+        """
+        db.query(update_clip_cypher, {"clip_id": clip_id})
+    elif action in ("replace", "reject"):
+        update_clip_cypher = """
+        MATCH (c:VideoClip {id: $clip_id})
+        MATCH (b:StoryBeat {id: $beat_id})
+        SET c.replace_count = coalesce(c.replace_count, 0) + (CASE WHEN $action = 'replace' THEN 1 ELSE 0 END),
+            c.reject_count = coalesce(c.reject_count, 0) + (CASE WHEN $action = 'reject' THEN 1 ELSE 0 END)
+        MERGE (c)-[:REJECTED_FOR {reason: $reason, feedback_id: $fb_id}]->(b)
+        """
+        db.query(update_clip_cypher, {
+            "clip_id": clip_id,
+            "beat_id": beat_id,
+            "action": action,
+            "reason": reason or f"Customer {action}ed suggestion",
+            "fb_id": fb_id
+        })
+
+    logger.info(f"Recorded feedback '{action}' for clip {clip_id} on beat {beat_id}")
+    return {
+        "feedback_id": fb_id,
+        "action": action,
+        "clip_id": clip_id,
+        "beat_id": beat_id,
+        "beat_role": beat_role,
+        "shot_type": shot_type,
+        "created_at": created_at
+    }
+
+
+def get_creator_feedback_history(creator_id: str = "creator_default") -> Dict[str, Any]:
+    """Retrieves all recorded feedback and aggregate statistics for a creator."""
+    cypher = """
+    MATCH (c:Creator {id: $creator_id})-[:RECORDED_FEEDBACK]->(fb:Feedback)
+    OPTIONAL MATCH (fb)-[:EVALUATES_CLIP]->(clip:VideoClip)<-[:CONTAINS_CLIP]-(sa:SourceAsset)
+    OPTIONAL MATCH (fb)-[:FOR_BEAT]->(b:StoryBeat)
+    RETURN fb.id AS id,
+           fb.action AS action,
+           fb.beat_role AS beat_role,
+           fb.decision_id AS decision_id,
+           fb.clip_id AS clip_id,
+           sa.filename AS source_file,
+           clip.shot_type AS shot_type,
+           clip.energy_level AS energy_level,
+           fb.reason AS reason,
+           fb.rating AS rating,
+           fb.created_at AS created_at
+    ORDER BY fb.created_at DESC
+    """
+    items = db.query_as_dicts(cypher, {"creator_id": creator_id})
+    
+    total_keeps = sum(1 for x in items if x["action"] == "keep")
+    total_replaces = sum(1 for x in items if x["action"] == "replace")
+    total_rejects = sum(1 for x in items if x["action"] == "reject")
+
+    return {
+        "total_feedback": len(items),
+        "keeps": total_keeps,
+        "replaces": total_replaces,
+        "rejects": total_rejects,
+        "approval_rate": round((total_keeps / max(1, len(items))) * 100, 1),
+        "items": items
+    }
+
+
+def learn_creator_taste(creator_id: str = "creator_default") -> List[Dict[str, Any]]:
+    """
+    Mines feedback choices across sessions in FalkorDB:
+    - Identifies patterns of approved/kept shot types for each beat role
+    - Analyzes energy level and pacing preferences
+    - Identifies visual tag affinities and avoidances
+    - Updates durable CreatorPreference nodes in FalkorDB to guide future rankings
+    """
+    cypher = """
+    MATCH (c:Creator {id: $creator_id})-[:RECORDED_FEEDBACK]->(fb:Feedback)
+    OPTIONAL MATCH (fb)-[:EVALUATES_CLIP]->(clip:VideoClip)
+    OPTIONAL MATCH (clip)-[:HAS_TAG]->(t:VisualTag)
+    RETURN fb.action AS action,
+           fb.beat_role AS beat_role,
+           coalesce(clip.shot_type, fb.shot_type) AS shot_type,
+           coalesce(clip.energy_level, fb.energy_level) AS energy_level,
+           collect(DISTINCT t.name) AS tags,
+           fb.reason AS reason
+    """
+    feedbacks = db.query_as_dicts(cypher, {"creator_id": creator_id})
+    if not feedbacks:
+        return []
+
+    learned_rules = []
+    
+    # Track statistics
+    keeps_by_role: Dict[str, Dict[str, int]] = {}
+    rejects_by_role: Dict[str, Dict[str, int]] = {}
+    kept_energies = []
+    kept_tags: Dict[str, int] = {}
+
+    for fb in feedbacks:
+        action = fb.get("action")
+        role = fb.get("beat_role") or "general"
+        shot = fb.get("shot_type") or "broll"
+        energy = fb.get("energy_level") or 3
+        tags = fb.get("tags") or []
+
+        if action == "keep":
+            if role not in keeps_by_role:
+                keeps_by_role[role] = {}
+            keeps_by_role[role][shot] = keeps_by_role[role].get(shot, 0) + 1
+            kept_energies.append(energy)
+            for t in tags:
+                kept_tags[t] = kept_tags.get(t, 0) + 1
+        elif action in ("replace", "reject"):
+            if role not in rejects_by_role:
+                rejects_by_role[role] = {}
+            rejects_by_role[role][shot] = rejects_by_role[role].get(shot, 0) + 1
+
+    # Rule Generation 1: Role-to-Shot Preferences
+    for role, shots in keeps_by_role.items():
+        for shot, count in shots.items():
+            if count >= 1:
+                pref_id = f"pref_learned_{role}_{shot}"
+                category = "Visual Continuity"
+                rule_text = f"Customer style: Always prioritize {shot.replace('_', ' ')} footage for {role} beats (Reinforced by {count} Keep choices)"
+                weight = round(1.6 + count * 0.25, 2)
+                add_creator_preference(creator_id, pref_id, category, rule_text, weight)
+                learned_rules.append({
+                    "id": pref_id,
+                    "category": category,
+                    "rule_text": rule_text,
+                    "weight": weight
+                })
+
+    # Rule Generation 2: Pacing & Energy Dynamics
+    if kept_energies:
+        avg_energy = sum(kept_energies) / len(kept_energies)
+        if avg_energy >= 3.6:
+            pref_id = "pref_learned_energy_pacing"
+            category = "Pacing & Style"
+            rule_text = f"Pacing preference: High energy and rapid cutting (target energy 4-5) across sequence cuts (Avg kept energy: {avg_energy:.1f})"
+            weight = 1.8
+            add_creator_preference(creator_id, pref_id, category, rule_text, weight)
+            learned_rules.append({
+                "id": pref_id,
+                "category": category,
+                "rule_text": rule_text,
+                "weight": weight
+            })
+        elif avg_energy <= 2.6:
+            pref_id = "pref_learned_calm_pacing"
+            category = "Pacing & Style"
+            rule_text = f"Pacing preference: Calm and deliberate pacing with steady visual flow (Avg kept energy: {avg_energy:.1f})"
+            weight = 1.6
+            add_creator_preference(creator_id, pref_id, category, rule_text, weight)
+            learned_rules.append({
+                "id": pref_id,
+                "category": category,
+                "rule_text": rule_text,
+                "weight": weight
+            })
+
+    # Rule Generation 3: Visual Tag Affinities
+    if kept_tags:
+        top_tags = sorted(kept_tags.items(), key=lambda x: x[1], reverse=True)
+        top_names = [t[0] for t in top_tags[:3] if t[1] >= 1]
+        if top_names:
+            pref_id = "pref_learned_tag_affinity"
+            category = "Visual Continuity"
+            rule_text = f"Creator visual affinity: Strongly favor clips featuring [{', '.join(top_names)}]"
+            weight = 1.7
+            add_creator_preference(creator_id, pref_id, category, rule_text, weight)
+            learned_rules.append({
+                "id": pref_id,
+                "category": category,
+                "rule_text": rule_text,
+                "weight": weight
+            })
+
+    # Rule Generation 4: Avoidances from Rejections
+    for role, shots in rejects_by_role.items():
+        for shot, r_count in shots.items():
+            if r_count >= 1 and shot not in keeps_by_role.get(role, {}):
+                pref_id = f"pref_avoid_{role}_{shot}"
+                category = "Director Avoidance"
+                rule_text = f"Director avoidance: Avoid using {shot.replace('_', ' ')} for {role} beats based on customer rejections"
+                weight = 1.5
+                add_creator_preference(creator_id, pref_id, category, rule_text, weight)
+                learned_rules.append({
+                    "id": pref_id,
+                    "category": category,
+                    "rule_text": rule_text,
+                    "weight": weight
+                })
+
+    logger.info(f"Learned and updated {len(learned_rules)} creator preferences from feedback choices.")
+    return learned_rules
+

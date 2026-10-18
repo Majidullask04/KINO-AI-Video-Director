@@ -37,6 +37,15 @@ export interface VideoClip {
   mood?: string;
   asset_id?: string;
   filename?: string;
+  edge_density?: number;
+  brightness?: number;
+  contrast?: number;
+  visual_summary?: string;
+  keep_count?: number;
+  replace_count?: number;
+  reject_count?: number;
+  video_url?: string;
+  fit_analysis?: ClipFitAnalysis;
 }
 
 export interface CutDecision {
@@ -129,3 +138,63 @@ export function formatSMPTE(seconds: number, fps: number = 24): string {
   const frames = Math.floor((safeSec % 1) * fps);
   return `00:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
 }
+
+export interface FeedbackItem {
+  id: string;
+  action: "keep" | "replace" | "reject";
+  beat_role: string;
+  decision_id?: string;
+  clip_id: string;
+  source_file?: string;
+  shot_type?: string;
+  energy_level?: number;
+  reason?: string;
+  rating?: number;
+  created_at: number;
+}
+
+export interface FeedbackSummary {
+  total_feedback: number;
+  keeps: number;
+  replaces: number;
+  rejects: number;
+  approval_rate: number;
+  items: FeedbackItem[];
+}
+
+export interface BeatFitBreakdown {
+  shot_type_score: number;
+  energy_score: number;
+  duration_score: number;
+  visual_tag_score: number;
+  preference_bonus: number;
+}
+
+export interface BeatFitRecommendation {
+  rank: number;
+  beat_id: string;
+  beat_index: number;
+  role: string;
+  role_label: string;
+  target_duration: number;
+  required_shot_type: string;
+  fit_percentage: number;
+  recommendation_tier: "HIGHLY RECOMMENDED" | "STRONG FIT" | "ALTERNATIVE FIT" | "NOT RECOMMENDED";
+  breakdown: BeatFitBreakdown;
+  rationale: string;
+}
+
+export interface ClipFitAnalysis {
+  clip_id: string;
+  filename: string;
+  shot_type: string;
+  energy_level: number;
+  duration: number;
+  motion_score: number;
+  edge_density?: number;
+  visual_summary?: string;
+  tags: string[];
+  best_fit_beat: BeatFitRecommendation;
+  ranked_recommendations: BeatFitRecommendation[];
+}
+
