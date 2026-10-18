@@ -13,9 +13,9 @@ services:
       - key: FALKORDB_HOST
         value: localhost
       - key: FALKORDB_PORT
-        value: "6379"
+        value: "56322"
       - key: FALKORDB_GRAPH_NAME
-        value: ai_video_director
+        value: KINO-AI-Video-Director
 
   # 2. KINO Studio Workstation (Next.js Frontend)
   - type: web
