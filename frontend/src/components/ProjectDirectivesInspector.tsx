@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { CutDecision, Project } from "@/types";
 import { API_BASE } from "@/utils/media";
+import { getFile, saveFile as saveStorageFile } from "@/lib/storage-adapter";
 
 interface ProjectDirectivesInspectorProps {
   activeProject: Project | null;
@@ -51,10 +52,9 @@ export const ProjectDirectivesInspector: React.FC<ProjectDirectivesInspectorProp
     setIsLoading(true);
     setStatusMessage(null);
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${activeProject.id}/files/${filename}`);
-      if (res.ok) {
-        const data = await res.json();
-        setFileContent(data.content || "");
+      const content = await getFile(activeProject.id, filename);
+      if (content) {
+        setFileContent(content);
         setIsDirty(false);
       } else {
         setFileContent(`// File ${filename} not found or empty on disk.`);
@@ -72,19 +72,11 @@ export const ProjectDirectivesInspector: React.FC<ProjectDirectivesInspectorProp
     setIsSaving(true);
     setStatusMessage(null);
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${activeProject.id}/files/${activeFile}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: fileContent }),
-      });
-      if (res.ok) {
-        setIsDirty(false);
-        setStatusMessage("Saved to disk");
-        if (onFileSaved) onFileSaved();
-        setTimeout(() => setStatusMessage(null), 3000);
-      } else {
-        setStatusMessage("Failed to save");
-      }
+      await saveStorageFile(activeProject.id, activeFile, fileContent);
+      setIsDirty(false);
+      setStatusMessage("Saved to disk");
+      if (onFileSaved) onFileSaved();
+      setTimeout(() => setStatusMessage(null), 3000);
     } catch (e) {
       console.error(`Failed to save ${activeFile}:`, e);
       setStatusMessage("Save error");

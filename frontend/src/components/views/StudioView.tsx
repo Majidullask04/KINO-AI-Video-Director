@@ -87,10 +87,12 @@ import {
   saveTimeline,
   checkBackendAvailability,
   listAssets,
+  saveAsset,
   deleteAsset,
   getFile,
   saveFile,
   createSampleMediaAssets,
+  resolveMediaUrl,
 } from "@/lib/storage-adapter";
 import { ingestLocalMediaFile, createStarterComposition } from "@/lib/media-engine";
 import {
@@ -317,6 +319,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
     try {
       const list = await listAssets(activeProject.id);
       setAssetsList(list);
+      storeSetAssets(list);
+
+      // Auto-heal clips on timeline: resolve sourceUrl from fresh live assets
+      const curTimeline = useStudioStore.getState().timeline;
+      if (curTimeline && curTimeline.clips && curTimeline.clips.length > 0) {
+        let hasChanges = false;
+        const healedClips = curTimeline.clips.map((clip) => {
+          const matchingUrl = resolveMediaUrl(clip, list);
+          if (matchingUrl && clip.sourceUrl !== matchingUrl) {
+            hasChanges = true;
+            return { ...clip, sourceUrl: matchingUrl };
+          }
+          return clip;
+        });
+        if (hasChanges) {
+          storeSetTimeline({ ...curTimeline, clips: healedClips }, { recordUndo: false });
+        }
+      }
     } catch (e) {
       console.warn("Could not load assets:", e);
     }
@@ -399,26 +419,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
       const newAssets: LocalAssetRecord[] = [];
 
       for (const file of fileArray) {
-        const { assetId, blobUrl, telemetry } = await ingestLocalMediaFile(file);
-        const asset: LocalAssetRecord = {
-          id: assetId,
-          filename: file.name,
-          url: blobUrl,
-          thumbnailUrl: telemetry.thumbnailUrl,
-          waveform: telemetry.waveform.length > 0 ? telemetry.waveform : undefined,
-          blob: file,
-          duration: telemetry.duration || 4.0,
-          width: telemetry.width,
-          height: telemetry.height,
-          fps: telemetry.fps || 30,
-          filesize_bytes: file.size,
-          has_audio: telemetry.hasAudio || (telemetry.waveform?.length || 0) > 0,
-          has_video: telemetry.hasVideo,
-          aspect_ratio: telemetry.width && telemetry.height ? (telemetry.width >= telemetry.height ? "16:9" : "9:16") : "16:9",
-          created_at: Date.now(),
-        };
-        newAssets.push(asset);
-        storeSetAssets([asset, ...storeAssets]);
+        const saved = await saveAsset(activeProject.id, file);
+        newAssets.push(saved);
       }
 
       await loadAssetsList();
@@ -426,6 +428,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       // Step E (Auto-Place on First Upload): If T1 is empty and we have a video
       const t1Clips = timelineState.clips.filter((c) => c.type === "video" && c.trackIndex === 1);
       const firstVideo = newAssets.find((a) => a.has_video !== false);
+      const firstAudio = newAssets.find((a) => a.has_video === false && a.has_audio);
 
       if (t1Clips.length === 0 && firstVideo) {
         const videoClip: TimelineClip = {
@@ -452,6 +455,27 @@ export const StudioView: React.FC<StudioViewProps> = ({
         await handleUpdateTimeline(updatedTimeline);
         storeSelectClip(videoClip.id);
         storeSetCurrentTime(0.0);
+      } else if (firstAudio && !timelineState.clips.some((c) => c.trackIndex === 3)) {
+        const audioClip: TimelineClip = {
+          id: `clip-audio-${Date.now()}`,
+          name: firstAudio.filename,
+          type: "audio",
+          start: 0.0,
+          duration: firstAudio.duration || 10.0,
+          trimStart: 0,
+          trimEnd: 0,
+          trackIndex: 3,
+          sourceAsset: firstAudio.filename,
+          sourceUrl: firstAudio.url,
+          transform: { x: 0, y: 0, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
+          audio: { volume: 100, muted: false, fadeIn: 0, fadeOut: 0, speed: 1 },
+        };
+        const updatedTimeline: TimelineProjectState = {
+          ...timelineState,
+          duration: Math.max(timelineState.duration, firstAudio.duration || 10.0),
+          clips: [...timelineState.clips, audioClip],
+        };
+        await handleUpdateTimeline(updatedTimeline);
       }
     } catch (e: any) {
       console.error("Upload error:", e);
@@ -525,7 +549,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     );
     if (t1VideoRef.current && activeT1Clip && activeT1Clip.type === "video") {
       const clipLocalTime = (currentTime - activeT1Clip.start) * (activeT1Clip.audio?.speed || 1) + (activeT1Clip.trimStart || 0);
-      if (Math.abs(t1VideoRef.current.currentTime - clipLocalTime) > 0.18) {
+      const threshold = isPlaying ? 0.15 : 0.005;
+      if (Math.abs(t1VideoRef.current.currentTime - clipLocalTime) > threshold) {
         t1VideoRef.current.currentTime = clipLocalTime;
       }
       if (isPlaying && t1VideoRef.current.paused) {
@@ -541,7 +566,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     );
     if (t2VideoRef.current && activeT2Clip && activeT2Clip.type === "video") {
       const clipLocalTime = (currentTime - activeT2Clip.start) * (activeT2Clip.audio?.speed || 1) + (activeT2Clip.trimStart || 0);
-      if (Math.abs(t2VideoRef.current.currentTime - clipLocalTime) > 0.18) {
+      const threshold = isPlaying ? 0.15 : 0.005;
+      if (Math.abs(t2VideoRef.current.currentTime - clipLocalTime) > threshold) {
         t2VideoRef.current.currentTime = clipLocalTime;
       }
       if (isPlaying && t2VideoRef.current.paused) {
@@ -557,7 +583,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     );
     if (t3AudioRef.current && activeT3Clip) {
       const clipLocalTime = currentTime - activeT3Clip.start + (activeT3Clip.trimStart || 0);
-      if (Math.abs(t3AudioRef.current.currentTime - clipLocalTime) > 0.2) {
+      const threshold = isPlaying ? 0.18 : 0.01;
+      if (Math.abs(t3AudioRef.current.currentTime - clipLocalTime) > threshold) {
         t3AudioRef.current.currentTime = clipLocalTime;
       }
       if (isPlaying && t3AudioRef.current.paused) {
@@ -587,7 +614,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   };
 
-  // Keyboard Spacebar Shortcut for Transport
+  // Keyboard Spacebar Shortcut & Clipboard Media Paste for Studio
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (
@@ -608,11 +635,36 @@ export const StudioView: React.FC<StudioViewProps> = ({
         } else {
           handleUndo();
         }
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        storeSetCurrentTime((t) => Math.max(0, (t || 0) - 1 / 30));
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        storeSetCurrentTime((t) => Math.min(totalDuration, (t || 0) + 1 / 30));
       }
     };
+
+    const onPaste = (e: ClipboardEvent) => {
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA" ||
+        (document.activeElement as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+      if (e.clipboardData?.files && e.clipboardData.files.length > 0) {
+        e.preventDefault();
+        handleFilesUpload(e.clipboardData.files);
+      }
+    };
+
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleTogglePlay, handleUndo, handleRedo]);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, [handleTogglePlay, handleUndo, handleRedo, totalDuration]);
 
   // ── 6. Stage Drag-to-Position for Layers ──
   useEffect(() => {
@@ -1496,7 +1548,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   )}
 
                   {/* ── LAYER 1: TRACK 1 (PRIMARY VIDEO / A-ROLL) ── */}
-                  {!t1Hidden && activeT1Clip && activeT1Clip.sourceUrl && (
+                  {!t1Hidden && activeT1Clip && (activeT1Clip.sourceUrl || resolveMediaUrl(activeT1Clip, assetsList)) && (
                     <div
                       style={{
                         position: "absolute",
@@ -1534,14 +1586,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       {activeT1Clip.type === "video" ? (
                         <video
                           ref={t1VideoRef}
-                          src={activeT1Clip.sourceUrl}
+                          src={resolveMediaUrl(activeT1Clip, assetsList)}
                           playsInline
                           muted={isMuted || t1Hidden || activeT1Clip.audio?.muted}
                           className="w-full h-full object-cover block"
                         />
                       ) : (
                         <img
-                          src={activeT1Clip.sourceUrl}
+                          src={resolveMediaUrl(activeT1Clip, assetsList)}
                           alt={activeT1Clip.name}
                           className="w-full h-full object-cover block"
                         />
@@ -1551,41 +1603,45 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
                   {/* ── LAYER 2: TRACK 2 (B-ROLL & PIP OVERLAYS) ── */}
                   {!t2Hidden &&
-                    activeT2Clips.map((clip) => (
-                      <div
-                        key={clip.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          storeSelectClip(clip.id);
-                        }}
-                        style={{
-                          position: "absolute",
-                          left: `${50 + clip.transform.x}%`,
-                          top: `${50 + clip.transform.y}%`,
-                          width: `${clip.transform.width}%`,
-                          height: `${clip.transform.height}%`,
-                          transform: `translate(-50%, -50%) scale(${clip.transform.scale}) rotate(${clip.transform.rotation}deg)`,
-                          opacity: clip.transform.opacity,
-                        }}
-                        className="rounded-xl overflow-hidden shadow-2xl z-20 cursor-move border border-white/20"
-                      >
-                        {clip.type === "video" ? (
-                          <video
-                            ref={t2VideoRef}
-                            src={clip.sourceUrl}
-                            playsInline
-                            muted={isMuted || t2Hidden || clip.audio?.muted}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <img
-                            src={clip.sourceUrl}
-                            alt={clip.name}
-                            className="w-full h-full object-cover"
-                          />
-                        )}
-                      </div>
-                    ))}
+                    activeT2Clips.map((clip) => {
+                      const clipUrl = resolveMediaUrl(clip, assetsList);
+                      if (!clipUrl) return null;
+                      return (
+                        <div
+                          key={clip.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            storeSelectClip(clip.id);
+                          }}
+                          style={{
+                            position: "absolute",
+                            left: `${50 + clip.transform.x}%`,
+                            top: `${50 + clip.transform.y}%`,
+                            width: `${clip.transform.width}%`,
+                            height: `${clip.transform.height}%`,
+                            transform: `translate(-50%, -50%) scale(${clip.transform.scale}) rotate(${clip.transform.rotation}deg)`,
+                            opacity: clip.transform.opacity,
+                          }}
+                          className="rounded-xl overflow-hidden shadow-2xl z-20 cursor-move border border-white/20"
+                        >
+                          {clip.type === "video" ? (
+                            <video
+                              ref={t2VideoRef}
+                              src={clipUrl}
+                              playsInline
+                              muted={isMuted || t2Hidden || clip.audio?.muted}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <img
+                              src={clipUrl}
+                              alt={clip.name}
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
 
                   {/* ── LAYER 0: TRACK 0 (OVERLAYS, TEXT & CAPTIONS) ── */}
                   {!t0Hidden &&
@@ -1686,10 +1742,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     })}
 
                   {/* ── LAYER 3: TRACK 3 (MASTER AUDIO BED) ── */}
-                  {!t3Muted && activeT3Clip && activeT3Clip.sourceUrl && (
+                  {!t3Muted && activeT3Clip && (activeT3Clip.sourceUrl || resolveMediaUrl(activeT3Clip, assetsList)) && (
                     <audio
                       ref={t3AudioRef}
-                      src={activeT3Clip.sourceUrl}
+                      src={resolveMediaUrl(activeT3Clip, assetsList)}
                       muted={isMuted || t3Muted || activeT3Clip.audio?.muted}
                     />
                   )}
@@ -1931,18 +1987,33 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <div className="p-3 border-t border-white/[0.06] bg-[#181817] space-y-2 shrink-0">
               {/* Full-width Scrubber Bar */}
               <div
-                className="w-full h-1.5 bg-white/10 rounded-full relative cursor-pointer group"
-                onClick={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const pct = (e.clientX - rect.left) / rect.width;
-                  handleSeek(pct * totalDuration);
+                className="w-full h-3 py-1 -my-1 relative cursor-pointer group flex items-center select-none touch-none"
+                onPointerDown={(e) => {
+                  const target = e.currentTarget;
+                  target.setPointerCapture(e.pointerId);
+                  const update = (clientX: number) => {
+                    const rect = target.getBoundingClientRect();
+                    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+                    handleSeek(pct * totalDuration);
+                  };
+                  update(e.clientX);
+                  const onPointerMove = (pe: PointerEvent) => update(pe.clientX);
+                  const onPointerUp = (pe: PointerEvent) => {
+                    target.releasePointerCapture(pe.pointerId);
+                    target.removeEventListener("pointermove", onPointerMove);
+                    target.removeEventListener("pointerup", onPointerUp);
+                  };
+                  target.addEventListener("pointermove", onPointerMove);
+                  target.addEventListener("pointerup", onPointerUp);
                 }}
               >
-                <div
-                  style={{ width: `${Math.min(100, Math.max(0, (currentTime / totalDuration) * 100))}%` }}
-                  className="h-full bg-[#34D399] rounded-full relative"
-                >
-                  <span className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="w-full h-1.5 bg-white/10 rounded-full relative overflow-visible">
+                  <div
+                    style={{ width: `${Math.min(100, Math.max(0, (currentTime / totalDuration) * 100))}%` }}
+                    className="h-full bg-[#34D399] rounded-full relative"
+                  >
+                    <span className="absolute right-0 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-white shadow-md group-hover:scale-125 transition-transform" />
+                  </div>
                 </div>
               </div>
 
@@ -2996,9 +3067,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   onChange={(e) => setByokState({ ...byokSettings, provider: e.target.value as any })}
                   className="w-full bg-[#222220] border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
                 >
-                  <option value="gemini">Google Gemini (Default: gemini-3.8-flash / Free)</option>
+                  <option value="gemini">Google Gemini (Default: gemini-2.5-flash / Free)</option>
                   <option value="openai">OpenAI (gpt-4o / gpt-4o-mini)</option>
                   <option value="anthropic">Anthropic (Claude 3.5 Sonnet)</option>
+                  <option value="groq">Groq (Llama 3.3 70B / Ultra-Fast)</option>
                   <option value="openrouter">OpenRouter (Groq / Open Weights)</option>
                   <option value="local_cli">Local CLI Bridge (FastAPI @ localhost)</option>
                 </select>

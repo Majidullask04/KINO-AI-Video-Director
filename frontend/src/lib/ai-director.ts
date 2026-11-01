@@ -5,7 +5,7 @@ import { API_BASE } from "@/utils/media";
 import { checkBackendAvailability } from "./storage-adapter";
 
 export interface ByokSettings {
-  provider: "gemini" | "openai" | "anthropic" | "openrouter" | "local_cli";
+  provider: "gemini" | "openai" | "anthropic" | "groq" | "openrouter" | "local_cli";
   apiKey: string;
   model?: string;
   customModel?: string;
@@ -243,6 +243,17 @@ export async function testApiKey(
       }
       const data = await res.json().catch(() => ({}));
       return { ok: false, message: data.error?.message || `OpenAI check returned HTTP ${res.status}` };
+    }
+
+    if (settings.provider === "groq") {
+      const res = await fetch("https://api.groq.com/openai/v1/models", {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      if (res.ok) {
+        return { ok: true, message: "Groq API connected successfully!", workingModel: "llama-3.3-70b-versatile" };
+      }
+      const data = await res.json().catch(() => ({}));
+      return { ok: false, message: data.error?.message || `Groq check returned HTTP ${res.status}` };
     }
 
     if (settings.provider === "openrouter") {
@@ -729,6 +740,26 @@ Respond ONLY with a JSON object conforming to this schema:
       }),
     });
     if (!res.ok) throw new Error(`OpenAI API error: HTTP ${res.status}`);
+    const data = await res.json();
+    rawResponse = data?.choices?.[0]?.message?.content || "";
+  } else if (byok.provider === "groq") {
+    const model = byok.model || "llama-3.3-70b-versatile";
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${byok.apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+      }),
+    });
+    if (!res.ok) throw new Error(`Groq API error: HTTP ${res.status}`);
     const data = await res.json();
     rawResponse = data?.choices?.[0]?.message?.content || "";
   } else if (byok.provider === "anthropic") {

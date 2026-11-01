@@ -21,6 +21,7 @@ import {
   createProject,
   getProjectDetails,
   saveAsset,
+  checkBackendAvailability,
 } from "@/lib/storage-adapter";
 
 // Modular Studio Views
@@ -93,6 +94,8 @@ export default function Home() {
   }, []);
 
   const fetchFeedbackSummary = async () => {
+    const isOnline = await checkBackendAvailability();
+    if (!isOnline) return;
     try {
       const res = await fetch(`${API_BASE}/api/creator/feedback`);
       if (res.ok) {
@@ -120,6 +123,8 @@ export default function Home() {
   };
 
   const fetchCreatorPreferences = async () => {
+    const isOnline = await checkBackendAvailability();
+    if (!isOnline) return;
     try {
       const res = await fetch(`${API_BASE}/api/creator/preferences`);
       if (res.ok) {
@@ -151,6 +156,8 @@ export default function Home() {
   };
 
   const refreshGraphState = async (projId: string) => {
+    const isOnline = await checkBackendAvailability();
+    if (!isOnline) return;
     try {
       const res = await fetch(`${API_BASE}/api/projects/${projId}/graph-state`);
       if (res.ok) {
@@ -330,8 +337,23 @@ export default function Home() {
     if (!targetProject) return;
 
     setIsUploadingFootage(true);
-    setUploadStatusText("Uploading video footage to media ingest server...");
+    setUploadStatusText("Checking ingestion environment...");
     try {
+      const isOnline = await checkBackendAvailability();
+
+      if (!isOnline) {
+        setUploadStatusText("Saving media locally into browser IndexedDB...");
+        for (const file of Array.from(files)) {
+          await saveAsset(targetProject.id, file);
+        }
+        await loadProjectDetails(targetProject);
+        setCurrentScreen("studio");
+        setToastNotice("Footage saved locally! Opening Studio timeline...");
+        setTimeout(() => setToastNotice(null), 4000);
+        return;
+      }
+
+      setUploadStatusText("Uploading video footage to media ingest server...");
       const formData = new FormData();
       Array.from(files).forEach((file) => {
         formData.append("files", file);

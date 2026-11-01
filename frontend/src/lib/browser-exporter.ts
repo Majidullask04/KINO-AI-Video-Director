@@ -89,18 +89,24 @@ export async function renderTimelineInBrowser(
   // Render loop across timeline frames
   const frameIntervalMs = 1000 / fps;
   const audioClips = (timeline.clips || []).filter((c) => c.type === "audio" && c.sourceUrl);
-  const audioSources = new Map<string, { el: HTMLAudioElement; src: MediaElementAudioSourceNode }>();
-  for (const clip of audioClips) {
-    const el = new Audio();
-    el.src = clip.sourceUrl as string;
-    const source = audioCtx!.createMediaElementSource(el);
-    source.connect(audioDest!);
-    el.playbackRate = clip.audio?.speed || 1;
-    el.volume = (clip.audio?.volume ?? 100) / 100;
-    if (clip.audio?.muted) el.muted = true;
-    el.currentTime = clip.start;
-    void el.play();
-    audioSources.set(clip.id, { el, src: source });
+  const audioSources = new Map<string, { el: HTMLAudioElement; src?: MediaElementAudioSourceNode }>();
+  if (audioCtx && audioDest) {
+    for (const clip of audioClips) {
+      try {
+        const el = new Audio();
+        el.src = clip.sourceUrl as string;
+        const source = audioCtx.createMediaElementSource(el);
+        source.connect(audioDest);
+        el.playbackRate = clip.audio?.speed || 1;
+        el.volume = (clip.audio?.volume ?? 100) / 100;
+        if (clip.audio?.muted) el.muted = true;
+        el.currentTime = clip.start;
+        void el.play().catch(() => {});
+        audioSources.set(clip.id, { el, src: source });
+      } catch (err) {
+        console.warn("Could not attach audio source node:", err);
+      }
+    }
   }
 
   for (let frame = 0; frame < totalFrames; frame++) {
@@ -180,7 +186,7 @@ export async function renderTimelineInBrowser(
       cleanupMediaElements(mediaElements);
       for (const entry of audioSources.values()) {
         entry.el.pause();
-        entry.src.disconnect();
+        entry.src?.disconnect();
       }
       audioSources.clear();
       if (audioCtx) void audioCtx.close();

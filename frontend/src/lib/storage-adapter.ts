@@ -9,6 +9,7 @@ import {
   ProjectCheckpoint,
 } from "@/types";
 import { API_BASE } from "@/utils/media";
+import { putMediaBlob } from "./media-engine";
 import {
   serializeTimelineToHtml,
   parseHtmlToTimeline,
@@ -358,6 +359,13 @@ export async function saveAsset(projectId: string, file: File): Promise<LocalAss
     created_at: Date.now(),
   };
 
+  // Sync raw binary into kino_media_blobs store
+  try {
+    await putMediaBlob(assetId, file);
+  } catch (e) {
+    console.warn("Could not cache blob into kino_media_blobs:", e);
+  }
+
   if (isOnline) {
     try {
       const formData = new FormData();
@@ -378,7 +386,7 @@ export async function saveAsset(projectId: string, file: File): Promise<LocalAss
     }
   }
 
-  // Store asset Blob in IndexedDB
+  // Store asset Blob in IndexedDB (kino_studio_db)
   await saveAssetToIndexedDb(projectId, assetRecord);
 
   return assetRecord;
@@ -403,8 +411,21 @@ export async function deleteAsset(projectId: string, assetIdOrFilename: string):
   }
 }
 
+export function resolveMediaUrl(
+  clip: { sourceAsset?: string; name?: string; sourceUrl?: string },
+  assets: LocalAssetRecord[]
+): string {
+  if (!clip) return "";
+  const match = assets.find(
+    (a) => a.filename === clip.sourceAsset || a.filename === clip.name || a.id === clip.sourceAsset
+  );
+  if (match?.url) return match.url;
+  return clip.sourceUrl || "";
+}
+
 export async function listAssets(projectId: string): Promise<LocalAssetRecord[]> {
   const isOnline = await checkBackendAvailability();
+  const localAssets = await getAssetsFromIndexedDb(projectId);
 
   if (isOnline) {
     try {
@@ -423,14 +444,21 @@ export async function listAssets(projectId: string): Promise<LocalAssetRecord[]>
           has_video: !!a.has_video,
           created_at: Date.now(),
         }));
-        if (backendAssets.length > 0) return backendAssets;
+
+        // Merge backend assets with local-only assets (backend preferred for identical filenames)
+        const backendNames = new Set(backendAssets.map((b: any) => b.filename));
+        const merged = [
+          ...backendAssets,
+          ...localAssets.filter((l) => !backendNames.has(l.filename)),
+        ];
+        return merged;
       }
     } catch (e) {
       console.warn("Backend manifest fetch failed:", e);
     }
   }
 
-  return await getAssetsFromIndexedDb(projectId);
+  return localAssets;
 }
 
 // ─────────────────────────────────────────────────────────────

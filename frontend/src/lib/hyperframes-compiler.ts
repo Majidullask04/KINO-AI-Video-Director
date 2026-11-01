@@ -129,8 +129,7 @@ export function compileTimelineToHtml(
         ? `position: absolute; left: 0px; top: 0px; width: ${state.width || 1920}px; height: ${state.height || 1080}px; object-fit: cover; opacity: ${initialOpacity}; z-index: ${zIndex};`
         : `position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: ${initialOpacity};`;
 
-    clipNodes.push(`      <!-- ${clip.type === "image" ? "Image" : "Video"} Clip: ${escapeHtml(clip.name || "Media")}
-
+    clipNodes.push(`      <!-- ${clip.type === "image" ? "Image" : "Video"} Clip: ${escapeHtml(clip.name || "Media")} -->
       <${clip.type === "image" ? "img" : "video"}
         id="${clipId}"
         class="clip ${clip.type === "image" ? "" : "video-clip"}"
@@ -162,23 +161,23 @@ export function compileTimelineToHtml(
     <title>${escapeHtml(title)} — KINO Composition</title>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
     <style>
-      :root {{
+      :root {
         --bg: #0a0a0a;
         --text: #e5e5e5;
-      }}
-      * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-      html, body {{ width: 100%; height: 100%; overflow: hidden; background: #000; }}
-      #root {{
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+      #root {
         position: relative;
         width: ${width}px;
         height: ${height}px;
         overflow: hidden;
         ${bgCss}
-      }}
-      .clip {{ position: absolute; inset: 0; width: 100%; height: 100%; }}
-      .safe-zone-overlay {{ position: absolute; inset: 0; pointer-events: none; z-index: 100; display: none; }}
-      .safe-zone-action {{ position: absolute; top: 5%; left: 5%; right: 5%; bottom: 5%; border: 1px dashed rgba(59, 130, 246, 0.4); }}
-      .safe-zone-title {{ position: absolute; top: 10%; left: 10%; right: 10%; bottom: 10%; border: 1px dashed rgba(245, 158, 11, 0.4); }}
+      }
+      .clip { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .safe-zone-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 100; display: none; }
+      .safe-zone-action { position: absolute; top: 5%; left: 5%; right: 5%; bottom: 5%; border: 1px dashed rgba(59, 130, 246, 0.4); }
+      .safe-zone-title { position: absolute; top: 10%; left: 10%; right: 10%; bottom: 10%; border: 1px dashed rgba(245, 158, 11, 0.4); }
     </style>
   </head>
   <body>

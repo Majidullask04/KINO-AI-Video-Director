@@ -222,9 +222,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   setAssets: (assets) => set({ assets }),
 
-  undo: get().history.undo,
-  redo: get().history.redo,
-  saveCheckpoint: (name) => get().history.saveCheckpoint(name),
+  undo: () => get().history?.undo?.(),
+  redo: () => get().history?.redo?.(),
+  saveCheckpoint: (name) => get().history?.saveCheckpoint?.(name),
 }));
 
 export const selectStudioTimeline = (s: StudioState): TimelineProjectState | null => s.timeline;

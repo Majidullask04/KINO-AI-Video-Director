@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { X, Sparkles, Check, Palette, Type, Sliders, ShieldCheck } from "lucide-react";
 import { Project } from "@/types";
 import { API_BASE } from "@/utils/media";
+import { getFile, saveFile } from "@/lib/storage-adapter";
 
 interface BrandKitsDrawerProps {
   isOpen: boolean;
@@ -37,10 +38,8 @@ export const BrandKitsDrawer: React.FC<BrandKitsDrawerProps> = ({
   const loadBrandKit = async () => {
     if (!activeProject) return;
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${activeProject.id}/files/frame.md`);
-      if (res.ok) {
-        const data = await res.json();
-        const content = data.content || "";
+      const content = await getFile(activeProject.id, "frame.md");
+      if (content) {
         // Parse simple tokens if present
         const primaryMatch = content.match(/--brand-primary:\s*(#[0-9a-fA-F]+)/);
         if (primaryMatch) setPrimaryColor(primaryMatch[1]);
@@ -88,19 +87,13 @@ export const BrandKitsDrawer: React.FC<BrandKitsDrawerProps> = ({
 `;
 
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${activeProject.id}/files/frame.md`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: frameMdContent }),
-      });
-      if (res.ok) {
-        setSaveSuccess(true);
-        if (onBrandKitSaved) onBrandKitSaved();
-        setTimeout(() => {
-          setSaveSuccess(false);
-          onClose();
-        }, 1200);
-      }
+      await saveFile(activeProject.id, "frame.md", frameMdContent);
+      setSaveSuccess(true);
+      if (onBrandKitSaved) onBrandKitSaved();
+      setTimeout(() => {
+        setSaveSuccess(false);
+        onClose();
+      }, 1200);
     } catch (e) {
       console.error("Failed to save brand kit:", e);
     } finally {

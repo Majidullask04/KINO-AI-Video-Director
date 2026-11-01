@@ -35,7 +35,7 @@ import {
 
 interface StudioTimelineProps {
   timeline?: TimelineProjectState;
-  onUpdateTimeline?: (timeline: TimelineProjectState) => void;
+  onUpdateTimeline?: (timeline: TimelineProjectState, recordUndo?: boolean) => void;
   selectedClipId?: string | null;
   onSelectClip?: (clipId: string | null) => void;
   // Backward-compatible props
@@ -87,6 +87,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
 
   const timelineContainerRef = useRef<HTMLDivElement | null>(null);
   const rulerRef = useRef<HTMLDivElement | null>(null);
+  const dragCommittedRef = useRef<TimelineClip[] | null>(null);
 
   const duration = Math.max(1, timeline?.duration || totalDuration || 12.0);
   const effectiveSelectedId = selectedClipId || selectedDecisionId || null;
@@ -248,13 +249,18 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
       }
 
       nextClips[targetClipIndex] = clip;
+      dragCommittedRef.current = nextClips;
 
       if (onUpdateTimeline && timeline) {
-        onUpdateTimeline({ ...timeline, clips: nextClips });
+        onUpdateTimeline({ ...timeline, clips: nextClips }, false);
       }
     };
 
     const handleMouseUp = () => {
+      if (dragCommittedRef.current && onUpdateTimeline && timeline) {
+        onUpdateTimeline({ ...timeline, clips: dragCommittedRef.current }, true);
+        dragCommittedRef.current = null;
+      }
       setDragState(null);
     };
 
@@ -352,6 +358,44 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
     }
   };
 
+  // Split specific clip at arbitrary timestamp (used by Razor tool click)
+  const handleSplitClipAtTime = (clip: TimelineClip, splitTime: number) => {
+    const isLocked = tracks.find((t) => t.index === clip.trackIndex)?.locked;
+    if (isLocked) return;
+
+    if (splitTime <= clip.start + 0.1 || splitTime >= clip.start + clip.duration - 0.1) {
+      return;
+    }
+
+    const firstDuration = Math.round((splitTime - clip.start) * 100) / 100;
+    const secondDuration = Math.round((clip.duration - firstDuration) * 100) / 100;
+
+    const firstHalf: TimelineClip = {
+      ...clip,
+      id: `${clip.id}-a-${Date.now()}`,
+      duration: firstDuration,
+    };
+
+    const secondHalf: TimelineClip = {
+      ...clip,
+      id: `${clip.id}-b-${Date.now()}`,
+      start: Math.round(splitTime * 100) / 100,
+      duration: secondDuration,
+      trimStart: (clip.trimStart || 0) + firstDuration,
+    };
+
+    const updated = activeClips
+      .filter((c) => c.id !== clip.id)
+      .concat([firstHalf, secondHalf]);
+
+    if (onUpdateTimeline && timeline) {
+      onUpdateTimeline({ ...timeline, clips: updated }, true);
+    }
+    if (onSelectClip) {
+      onSelectClip(secondHalf.id);
+    }
+  };
+
   // Delete selected clip (with ripple delete: shifts later clips on the track earlier)
   const handleDeleteSelectedClip = () => {
     if (!effectiveSelectedId) return;
@@ -380,7 +424,6 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
           return {
             ...c,
             start: Math.round((c.start - shift) * 100) / 100,
-            trimStart: Math.max(0, Math.round(((c.trimStart || 0) - shift) * 100) / 100),
           };
         }
         return c;
@@ -478,18 +521,22 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
               <MousePointer className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => {
-                setActiveTool("razor");
-                handleSplitAtPlayhead();
-              }}
+              onClick={() => setActiveTool((prev) => (prev === "razor" ? "pointer" : "razor"))}
               className={`p-1.5 rounded-md text-xs transition-colors ${
                 activeTool === "razor"
-                  ? "bg-[#222220] text-[#34D399] border border-white/10"
+                  ? "bg-[#34D399]/20 text-[#34D399] border border-[#34D399]/40"
                   : "text-zinc-400 hover:text-zinc-200"
               }`}
-              title="Split at Playhead (S or Razor)"
+              title="Razor Cut Tool (C) — Click any clip to split at cursor"
             >
               <Scissors className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleSplitAtPlayhead}
+              className="px-2 py-1 rounded-md text-xs text-zinc-300 hover:text-[#34D399] hover:bg-[#222220] transition-colors font-mono text-[10px] font-bold"
+              title="Split at Playhead (S key)"
+            >
+              SPLIT
             </button>
             <button
               onClick={handleDuplicateSelectedClip}
@@ -681,12 +728,24 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
           {/* SMPTE Ruler (24px height) */}
           <div
             ref={rulerRef}
-            className="h-[24px] min-h-[24px] border-b border-[#222220] relative bg-[#141413] cursor-pointer"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const clickX = e.clientX - rect.left;
-              const ratio = Math.max(0, Math.min(1, clickX / rect.width));
-              onSeek(ratio * duration);
+            className="h-[24px] min-h-[24px] border-b border-[#222220] relative bg-[#141413] cursor-pointer touch-none select-none"
+            onPointerDown={(e) => {
+              const target = e.currentTarget;
+              target.setPointerCapture(e.pointerId);
+              const seekFromEvent = (clientX: number) => {
+                const rect = target.getBoundingClientRect();
+                const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+                onSeek(ratio * duration);
+              };
+              seekFromEvent(e.clientX);
+              const onMove = (pe: PointerEvent) => seekFromEvent(pe.clientX);
+              const onUp = (pe: PointerEvent) => {
+                target.releasePointerCapture(pe.pointerId);
+                target.removeEventListener("pointermove", onMove);
+                target.removeEventListener("pointerup", onUp);
+              };
+              target.addEventListener("pointermove", onMove);
+              target.addEventListener("pointerup", onUp);
             }}
           >
             {ticks.map((sec) => (
@@ -706,9 +765,28 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
           {/* Playhead Scrubber Needle */}
           <div
             style={{ left: `${progressPercent}%` }}
-            className="absolute top-0 bottom-0 w-[2px] bg-[#34D399] z-30 pointer-events-none transition-all duration-75 shadow-[0_0_10px_rgba(52,211,153,0.7)]"
+            className="absolute top-0 bottom-0 w-[2px] bg-[#34D399] z-30 shadow-[0_0_10px_rgba(52,211,153,0.7)] cursor-ew-resize touch-none select-none"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              const container = timelineContainerRef.current;
+              if (!container) return;
+              const target = e.currentTarget;
+              target.setPointerCapture(e.pointerId);
+              const onMove = (pe: PointerEvent) => {
+                const rect = container.getBoundingClientRect();
+                const ratio = Math.max(0, Math.min(1, (pe.clientX - rect.left) / rect.width));
+                onSeek(ratio * duration);
+              };
+              const onUp = (pe: PointerEvent) => {
+                target.releasePointerCapture(pe.pointerId);
+                target.removeEventListener("pointermove", onMove);
+                target.removeEventListener("pointerup", onUp);
+              };
+              target.addEventListener("pointermove", onMove);
+              target.addEventListener("pointerup", onUp);
+            }}
           >
-            <div className="w-3 h-3 bg-[#34D399] -ml-[5px] top-0 rounded-t-sm shadow-md" />
+            <div className="w-3.5 h-3.5 bg-[#34D399] -ml-[6px] top-0 rounded-b-md shadow-md hover:scale-125 transition-transform" />
           </div>
 
           {/* Track Lanes */}
@@ -752,10 +830,18 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
                         key={clip.id}
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (activeTool === "razor") {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const clickRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                            const splitTime = clip.start + clickRatio * clip.duration;
+                            handleSplitClipAtTime(clip, splitTime);
+                            return;
+                          }
                           handleSelectClip(clip);
                           onSeek(clip.start);
                         }}
                         onMouseDown={(e) => {
+                          if (activeTool === "razor") return;
                           // Ignore if clicking on trim handles
                           if ((e.target as HTMLElement).dataset.handle) return;
                           setDragState({
@@ -771,7 +857,9 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
                           left: `${leftPercent}%`,
                           width: `${Math.max(1, widthPercent)}%`,
                         }}
-                        className={`absolute top-1.5 bottom-1.5 rounded-xl border px-2 flex flex-col justify-between overflow-hidden cursor-grab active:cursor-grabbing transition-shadow ${themeClass} ${
+                        className={`absolute top-1.5 bottom-1.5 rounded-xl border px-2 flex flex-col justify-between overflow-hidden transition-shadow ${
+                          activeTool === "razor" ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing"
+                        } ${themeClass} ${
                           isSelected
                             ? "border-[#34D399] ring-2 ring-[#34D399]/40 shadow-lg shadow-[#34D399]/20 z-10"
                             : "hover:border-white/30"
