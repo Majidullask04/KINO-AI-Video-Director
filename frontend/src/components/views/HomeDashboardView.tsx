@@ -28,6 +28,7 @@ import { BrandLogo, FrameyMascot } from "../BrandLogo";
 import { BrandKitsDrawer } from "../BrandKitsDrawer";
 import { SettingsDoctorModal } from "../SettingsDoctorModal";
 import { API_BASE } from "@/utils/media";
+import { deleteProject, checkBackendAvailability } from "@/lib/storage-adapter";
 
 interface HomeDashboardViewProps {
   projects: Project[];
@@ -54,7 +55,12 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({
   const [isCreating, setIsCreating] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [starterMode, setStarterMode] = useState<"make" | "record" | "script">("make");
+  const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
   const homeFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    checkBackendAvailability().then(setIsBackendOnline);
+  }, []);
 
   const handleHomeFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -88,8 +94,11 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({
 
   const handleArchiveProject = async (projectId: string) => {
     setOpenMenuId(null);
-    await fetch(`${API_BASE}/api/projects/${projectId}`, { method: "DELETE" })
-      .catch(() => {}); // Best effort
+    try {
+      await deleteProject(projectId);
+    } catch (e) {
+      console.warn("Failed to delete project:", e);
+    }
     onRefreshProjects();
   };
 
@@ -260,9 +269,24 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({
 
       {/* 2. Main Dashboard Area */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Top Header: Centered "Make something." + Right Discord */}
+        {/* Top Header: Centered "Make something." + Right Discord & Status */}
         <header className="h-14 flex items-center justify-between px-4 shrink-0">
-          <div className="w-[120px]" />
+          <div className="w-[180px]">
+            <div
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border transition-all ${
+                isBackendOnline
+                  ? "bg-emerald-950/60 text-[#34D399] border-emerald-500/30"
+                  : "bg-white/5 text-[#9E9E98] border-white/10"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isBackendOnline ? "bg-[#34D399] animate-pulse" : "bg-[#9E9E98]"
+                }`}
+              />
+              <span>{isBackendOnline ? "CLI Engine Online" : "Browser Mode (Free)"}</span>
+            </div>
+          </div>
           <h1 className="text-2xl font-bold tracking-tight text-[#F4F4F2]">
             Make something.
           </h1>

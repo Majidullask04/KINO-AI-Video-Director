@@ -119,6 +119,132 @@ export interface HyperFramesComposition {
   cli_command: string;
 }
 
+// ─────────────────────────────────────────────────────────────
+// OpenCut-Parity Manual Non-Linear Editor (NLE) Models
+// ─────────────────────────────────────────────────────────────
+
+export interface ClipTransform {
+  x: number; // percentage (0-100) or pixels
+  y: number; // percentage (0-100) or pixels
+  width: number; // percentage (0-100) or pixels
+  height: number;
+  scale: number; // 0.1 to 5.0 (1.0 default)
+  rotation: number; // -360 to +360 degrees
+  opacity: number; // 0.0 to 1.0 (1.0 default)
+}
+
+export interface ClipStyle {
+  fontFamily?: string;
+  fontSize?: number; // in pixels (default >= 28)
+  fontWeight?: string | number;
+  color?: string; // hex
+  backgroundColor?: string; // hex or rgba
+  outlineColor?: string;
+  outlineWidth?: number;
+  shadow?: string;
+  textAlign?: "left" | "center" | "right";
+  letterSpacing?: number;
+  lineHeight?: number;
+  padding?: number;
+}
+
+export interface ClipMask {
+  type: "none" | "rect" | "circle" | "split" | "letterbox";
+  feather: number; // 0 to 50px
+  invert: boolean;
+}
+
+export interface ClipAudio {
+  volume: number; // 0 to 200% (default 100)
+  muted: boolean;
+  fadeIn: number; // in seconds (e.g. 0.5)
+  fadeOut: number; // in seconds
+  speed: number; // 0.25 to 4.0 (default 1.0)
+}
+
+export interface ClipAnimation {
+  in: "none" | "fade" | "pop" | "slide-up" | "typewriter" | "word-reveal";
+  out: "none" | "fade" | "slide-down";
+  duration: number; // in seconds
+}
+
+export interface ClipKeyframe {
+  time: number; // timestamp relative to clip start (0 to clip.duration)
+  transform?: Partial<ClipTransform>;
+  opacity?: number;
+  ease?: "linear" | "easeOut" | "easeInOut" | "spring";
+}
+
+export interface TimelineClip {
+  id: string;
+  name: string;
+  type: "video" | "audio" | "image" | "text" | "sticker" | "shape";
+  start: number; // start time on master timeline in seconds
+  duration: number; // duration on master timeline in seconds
+  trimStart?: number; // trim offset from start of source media file
+  trimEnd?: number; // trim offset from end of source media file
+  trackIndex: number; // 0: Overlays/Graphics, 1: Main Video, 2: B-Roll, 3: Audio Master
+  sourceAsset?: string;
+  sourceUrl?: string; // blob: or http: URL
+  blob?: Blob;
+  text?: string;
+  transform: ClipTransform;
+  style?: ClipStyle;
+  mask?: ClipMask;
+  audio?: ClipAudio;
+  animation?: ClipAnimation;
+  keyframes?: ClipKeyframe[];
+  filter?: "none" | "blur" | "glow" | "bw" | "vintage" | "contrast" | "vignette";
+  transition?: {
+    type: "none" | "cross-dissolve" | "whip-pan" | "zoom" | "glitch" | "slide";
+    duration: number;
+  };
+  narrative_beat?: string;
+  order?: number;
+}
+
+export interface TimelineTrack {
+  id: string;
+  index: number;
+  kind: "video" | "audio" | "text" | "overlay";
+  name: string;
+  locked: boolean;
+  muted: boolean;
+  hidden: boolean;
+}
+
+export interface TimelineProjectState {
+  projectId: string;
+  duration: number;
+  fps: number;
+  width: number;
+  height: number;
+  aspectRatio: string;
+  background: {
+    type: "color" | "gradient" | "blurred-video";
+    value: string;
+  };
+  tracks: TimelineTrack[];
+  clips: TimelineClip[];
+}
+
+export interface LocalAssetRecord {
+  filename: string;
+  filepath?: string;
+  url: string;
+  blob?: Blob;
+  duration: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  filesize_bytes?: number;
+  has_audio: boolean;
+  has_video: boolean;
+  aspect_ratio?: string;
+  created_at: number;
+}
+
+
 export interface HyperFramesLintCheck {
   id: string;
   name: string;

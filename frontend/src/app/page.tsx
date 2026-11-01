@@ -16,6 +16,12 @@ import {
 } from "@/types";
 import { Cpu, ShieldCheck, History } from "lucide-react";
 import { API_BASE, backendMediaUrl } from "@/utils/media";
+import {
+  listProjects,
+  createProject,
+  getProjectDetails,
+  saveAsset,
+} from "@/lib/storage-adapter";
 
 // Modular Studio Views
 import { HomeDashboardView } from "@/components/views/HomeDashboardView";
@@ -100,15 +106,12 @@ export default function Home() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/projects`);
-      if (res.ok) {
-        const data = await res.json();
-        setProjects(data.projects || []);
-        if (data.projects && data.projects.length > 0) {
-          const currentValid = data.projects.find((p: Project) => p.id === activeProject?.id);
-          if (!currentValid) {
-            loadProjectDetails(data.projects[0]);
-          }
+      const projs = await listProjects();
+      setProjects(projs);
+      if (projs && projs.length > 0) {
+        const currentValid = projs.find((p) => p.id === activeProject?.id);
+        if (!currentValid) {
+          loadProjectDetails(projs[0]);
         }
       }
     } catch (e) {
@@ -133,21 +136,13 @@ export default function Home() {
     setActiveProject(proj);
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${proj.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setReferenceBeats(data.reference_beats || []);
-        setSourceClips(data.source_assets || []);
-        setVersions(data.versions || []);
-
-        if (data.versions && data.versions.length > 0) {
-          const latest = data.versions[data.versions.length - 1];
-          if (latest.preview_url) {
-            setActivePreviewUrl(backendMediaUrl(latest.preview_url));
-          }
-        }
+      const details = await getProjectDetails(proj.id);
+      if (details.project) {
+        setActiveProject(details.project);
       }
-      await refreshGraphState(proj.id);
+      setDecisions(details.decisions || []);
+      setSourceClips(details.assets as any || []);
+      refreshGraphState(proj.id);
     } catch (e) {
       console.error("Error loading project details:", e);
     } finally {
@@ -577,34 +572,17 @@ export default function Home() {
   const handleCreateNewProject = async (prompt: string, cuts: string[]) => {
     const title = prompt.slice(0, 32).trim() || "Untitled Production";
     try {
-      const res = await fetch(`${API_BASE}/api/projects`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          target_duration: cuts.length > 0 ? cuts.length * 3.0 : 12.0,
-          aspect_ratio: "16:9",
-          category: "Social / Explainer",
-          mood: "energetic",
-        }),
+      const newProj = await createProject({
+        title,
+        target_duration: cuts.length > 0 ? cuts.length * 3.0 : 12.0,
+        aspect_ratio: "16:9",
+        category: "Social / Explainer",
+        mood: "energetic",
       });
-      if (res.ok) {
-        const data = await res.json();
-        const newProj = data.project;
-        if (newProj) {
-          // Persist the user brief & cuts to STORYBOARD.md
-          const storyboardContent = `# Storyboard: ${newProj.title}\n\n## Creative Brief\n${prompt}\n\n## Scene Beats\n${cuts.map((c, i) => `### Beat 0${i + 1}: ${c}\n- Target Duration: 3.0s\n- Style: Kinetic Overlay & Reveal\n`).join("\n")}\n`;
-          await fetch(`${API_BASE}/api/projects/${newProj.id}/files/STORYBOARD.md`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: storyboardContent }),
-          }).catch(() => {});
 
-          await fetchProjects();
-          await loadProjectDetails(newProj);
-          setCurrentScreen("studio");
-        }
-      }
+      await fetchProjects();
+      await loadProjectDetails(newProj);
+      setCurrentScreen("studio");
     } catch (e) {
       console.error("Error creating project:", e);
     }
