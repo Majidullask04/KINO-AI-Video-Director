@@ -385,6 +385,43 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
     }
   };
 
+  // Global Keyboard Shortcuts (Space, S/Cmd+B, Backspace/Delete, Cmd+D, Arrow keys)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        onTogglePlay();
+      } else if (e.key === "s" || e.key === "S" || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b")) {
+        e.preventDefault();
+        handleSplitAtPlayhead();
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+        handleDeleteSelectedClip();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        handleDuplicateSelectedClip();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        onSeek(Math.max(0, currentTime - 1 / 30));
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        onSeek(Math.min(duration, currentTime + 1 / 30));
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onTogglePlay, currentTime, duration, effectiveSelectedId, activeClips, onSeek]);
+
   // Add new track
   const handleAddTrack = (kind: "video" | "audio" | "text") => {
     setIsAddTrackOpen(false);
@@ -744,6 +781,37 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
                             : "hover:border-white/30"
                         }`}
                       >
+                        {/* Background Video Filmstrip Frames */}
+                        {clip.type === "video" && (clip.filmstrip || clip.sourceUrl) && (
+                          <div className="absolute inset-0 flex overflow-hidden opacity-25 pointer-events-none rounded-xl">
+                            {clip.filmstrip && clip.filmstrip.length > 0 ? (
+                              clip.filmstrip.map((thumb, idx) => (
+                                <img
+                                  key={idx}
+                                  src={thumb}
+                                  alt=""
+                                  className="h-full flex-1 object-cover border-r border-white/10"
+                                />
+                              ))
+                            ) : clip.sourceUrl ? (
+                              <img src={clip.sourceUrl} alt="" className="w-full h-full object-cover" />
+                            ) : null}
+                          </div>
+                        )}
+
+                        {/* Background Audio Waveform Peaks */}
+                        {(clip.type === "audio" || (clip.type === "video" && clip.waveform)) && clip.waveform && (
+                          <div className="absolute inset-x-2 bottom-1 top-4 flex items-end gap-0.5 opacity-50 pointer-events-none overflow-hidden">
+                            {clip.waveform.slice(0, 50).map((peak, idx) => (
+                              <div
+                                key={idx}
+                                style={{ height: `${Math.max(15, peak * 100)}%` }}
+                                className={`w-1 rounded-t-sm shrink-0 ${clip.type === "audio" ? "bg-teal-300" : "bg-emerald-300"}`}
+                              />
+                            ))}
+                          </div>
+                        )}
+
                         {/* Left Trim Handle */}
                         <div
                           data-handle="left"
@@ -763,14 +831,21 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
                         />
 
                         {/* Clip Content Details */}
-                        <div className="flex items-center justify-between text-[10px] font-mono font-medium truncate pointer-events-none mt-0.5">
+                        <div className="flex items-center justify-between text-[10px] font-mono font-medium truncate pointer-events-none mt-0.5 z-10">
                           <span className="truncate">{clip.name}</span>
-                          <span className="text-[9px] text-[#34D399] font-bold shrink-0 ml-1">
-                            {clip.duration.toFixed(1)}s
-                          </span>
+                          <div className="flex items-center gap-1 shrink-0 ml-1">
+                            {clip.transition && clip.transition.type !== "none" && (
+                              <span className="text-[8px] bg-white/15 px-1 rounded text-zinc-300">
+                                ⧖ {clip.transition.type}
+                              </span>
+                            )}
+                            <span className="text-[9px] text-[#34D399] font-bold">
+                              {clip.duration.toFixed(1)}s
+                            </span>
+                          </div>
                         </div>
 
-                        <div className="flex items-center justify-between text-[8px] font-mono text-zinc-400 truncate pointer-events-none mb-0.5">
+                        <div className="flex items-center justify-between text-[8px] font-mono text-zinc-400 truncate pointer-events-none mb-0.5 z-10">
                           <span className="truncate">{clip.text || clip.sourceAsset || clip.type}</span>
                           <span className="text-zinc-500 shrink-0">
                             {clip.start.toFixed(1)}s

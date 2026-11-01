@@ -207,6 +207,8 @@ export interface TimelineClip {
   };
   narrative_beat?: string;
   order?: number;
+  filmstrip?: string[];
+  waveform?: number[];
 }
 
 export interface TimelineTrack {
@@ -240,6 +242,8 @@ export interface LocalAssetRecord {
   filepath?: string;
   url: string;
   thumbnailUrl?: string;
+  filmstrip?: string[];
+  waveform?: number[];
   blob?: Blob;
   duration: number;
   width?: number;

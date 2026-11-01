@@ -55,10 +55,15 @@ import {
   AlignCenter,
   AlignRight,
   RotateCw,
+  RotateCcw,
   ZoomIn,
   Music,
   ExternalLink,
+  Code,
+  FileArchive,
 } from "lucide-react";
+import JSZip from "jszip";
+import { serializeTimelineToHtml } from "@/lib/html-serializer";
 import {
   Project,
   CutDecision,
@@ -86,6 +91,7 @@ import {
   deleteAsset,
   getFile,
   saveFile,
+  createSampleMediaAssets,
 } from "@/lib/storage-adapter";
 import {
   renderTimelineInBrowser,
@@ -97,6 +103,8 @@ import {
   getByokSettings,
   saveByokSettings,
   testApiKey,
+  discoverGeminiModels,
+  GEMINI_MODEL_CASCADE,
   ByokSettings,
 } from "@/lib/ai-director";
 
@@ -131,6 +139,8 @@ interface AgentLogMessage {
   durationText?: string;
   steps?: string[];
   recoveryOptions?: string[];
+  actionsTaken?: Array<{ type: string; description: string }>;
+  previousTimeline?: TimelineProjectState;
 }
 
 export const StudioView: React.FC<StudioViewProps> = ({
@@ -214,9 +224,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
 
-  // Storyboard Markdown State
+  // Storyboard Markdown & Multi-Tab State (Module 5)
   const [storyboardContent, setStoryboardContent] = useState<string>("");
   const [isSavingStoryboard, setIsSavingStoryboard] = useState<boolean>(false);
+  const [storyboardSubTab, setStoryboardSubTab] = useState<"beats" | "brand" | "dom">("beats");
+  const [frameContent, setFrameContent] = useState<string>("# BRAND KIT & DESIGN TOKENS\n\n--primary: #34D399 (Mint Glow)\n--accent: #FBBF24 (Amber Serif)\n--bg-canvas: #0F0F0E\n--font-display: 'Playfair Display', serif\n--font-body: Inter, sans-serif\n--shadow: 0 0 24px rgba(251, 191, 36, 0.5)\n");
+  const [isSavingFrame, setIsSavingFrame] = useState<boolean>(false);
+  const [copiedHtml, setCopiedHtml] = useState<boolean>(false);
+
+  // Dual Export Modal State (Module 5)
+  const [exportTab, setExportTab] = useState<"video" | "zip">("video");
+
+  // Custom Model Toggle in BYOK Modal
+  const [isCustomModel, setIsCustomModel] = useState<boolean>(false);
 
   // Local Media Assets Bin
   const [assetsList, setAssetsList] = useState<LocalAssetRecord[]>([]);
@@ -602,6 +622,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setAgentMessages((prev) => [...prev, userMsg]);
 
     try {
+      const prevTimeline = timelineState;
       const result = await executeAiDirective(activeProject.id, prompt, timelineState);
       await handleUpdateTimeline(result.updatedTimeline);
 
@@ -615,6 +636,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
           "Synchronized state to IndexedDB",
         ],
         text: result.logMessage,
+        actionsTaken: result.actionsTaken,
+        previousTimeline: prevTimeline,
       };
 
       setAgentMessages((prev) => [...prev, agentReply]);
@@ -631,19 +654,25 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   };
 
-  // Test & Save API Key Helper
+  // Test & Save API Key Helper with Dynamic Discovery
   const handleTestAndSaveKey = async () => {
     setIsTestingKey(true);
-    setByokStatusText("Testing connection...");
+    setByokStatusText("Testing connection & discovering available models...");
     try {
       const res = await testApiKey(byokSettings);
       setByokStatusText(res.message);
       if (res.ok) {
-        saveByokSettings(byokSettings);
+        const updated: ByokSettings = {
+          ...byokSettings,
+          model: res.workingModel || byokSettings.model,
+          discoveredModels: res.discoveredModels || byokSettings.discoveredModels,
+        };
+        setByokState(updated);
+        saveByokSettings(updated);
         setTimeout(() => {
           setIsByokModalOpen(false);
           setByokStatusText("");
-        }, 1200);
+        }, 1500);
       }
     } catch (e: any) {
       setByokStatusText(`Validation failed: ${e.message}`);
@@ -700,6 +729,115 @@ export const StudioView: React.FC<StudioViewProps> = ({
       console.error("Export error:", e);
       alert(`Export error: ${e.message}`);
       setIsExporting(false);
+    }
+  };
+
+  // ── HyperFrames Project Bundle Export (.zip) (Module 5) ──
+  const handleExportZipBundle = async () => {
+    if (!activeProject || !timelineState) return;
+    setIsExporting(true);
+    try {
+      const zip = new JSZip();
+      const indexHtml = serializeTimelineToHtml(timelineState, activeProject.title);
+      zip.file("index.html", indexHtml);
+      zip.file(
+        "meta.json",
+        JSON.stringify(
+          {
+            id: activeProject.id,
+            title: activeProject.title,
+            target_duration: timelineState.duration,
+            duration: timelineState.duration,
+            aspect_ratio: timelineState.aspectRatio,
+            fps: timelineState.fps,
+            width: timelineState.width,
+            height: timelineState.height,
+          },
+          null,
+          2
+        )
+      );
+      zip.file("STORYBOARD.md", storyboardContent || "# STORYBOARD\nAuto-generated scene beats.");
+      zip.file("SCRIPT.md", "# SCRIPT & TIMED VOICEOVER\n");
+      zip.file("frame.md", frameContent || "# BRAND KIT & DESIGN TOKENS\n--primary: #34D399\n--font: Inter, 'Playfair Display'");
+      zip.file(
+        "render.sh",
+        `#!/usr/bin/env bash\necho "🎬 Rendering HyperFrames composition locally..."\nnpx hyperframes check --json\nnpx hyperframes render\n`
+      );
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      triggerFileDownload(URL.createObjectURL(blob), `${activeProject.id}-hyperframes.zip`);
+      setIsExportModalOpen(false);
+    } catch (err: any) {
+      alert(`Failed to export ZIP bundle: ${err.message}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // ── 1-Click Sample Footage Loader (Module 1) ──
+  const handleLoadSampleFootage = async () => {
+    if (!activeProject || !timelineState) return;
+    setIsAgentBusy(true);
+    try {
+      const sampleAssets = await createSampleMediaAssets(activeProject.id);
+      setAssetsList(sampleAssets);
+
+      // Populate clips onto timeline
+      const sampleClips: TimelineClip[] = [
+        {
+          id: `sample-clip-1-${Date.now()}`,
+          name: sampleAssets[0]?.filename || "sample-neon-drift.mp4",
+          type: "image" as const,
+          start: 0.0,
+          duration: 6.0,
+          trackIndex: 1,
+          sourceAsset: sampleAssets[0]?.filename || "sample-neon-drift.mp4",
+          sourceUrl: sampleAssets[0]?.thumbnailUrl,
+          filmstrip: sampleAssets[0]?.filmstrip,
+          transform: { x: 0, y: 0, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
+        },
+        ...(sampleAssets[1]
+          ? [
+              {
+                id: `sample-clip-2-${Date.now()}`,
+                name: sampleAssets[1].filename,
+                type: "image" as const,
+                start: 6.0,
+                duration: 6.0,
+                trackIndex: 1,
+                sourceAsset: sampleAssets[1].filename,
+                sourceUrl: sampleAssets[1].thumbnailUrl,
+                filmstrip: sampleAssets[1].filmstrip,
+                transform: { x: 0, y: 0, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
+              },
+            ]
+          : []),
+        ...(sampleAssets[2]
+          ? [
+              {
+                id: `sample-audio-${Date.now()}`,
+                name: sampleAssets[2].filename,
+                type: "audio" as const,
+                start: 0.0,
+                duration: 12.0,
+                trackIndex: 3,
+                sourceAsset: sampleAssets[2].filename,
+                waveform: sampleAssets[2].waveform,
+                transform: { x: 0, y: 0, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
+                audio: { volume: 80, muted: false, fadeIn: 0.5, fadeOut: 0.5, speed: 1.0 },
+              },
+            ]
+          : []),
+      ];
+
+      const textClips = timelineState.clips.filter((c) => c.trackIndex === 0);
+      const updatedClips = [...textClips, ...sampleClips];
+      await handleUpdateTimeline({ ...timelineState, clips: updatedClips });
+    } catch (e: any) {
+      console.warn("Failed to load sample footage:", e);
+    } finally {
+      setIsAgentBusy(false);
     }
   };
 
@@ -1075,6 +1213,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       ✨ Amber Captions
                     </button>
                     <button
+                      onClick={() => handleAgentSubmit("Cut silent gaps and remove silent pauses from audio and video clips.")}
+                      className="text-left text-[11px] p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors"
+                    >
+                      🔇 Cut Silent Gaps
+                    </button>
+                    <button
+                      onClick={() => handleAgentSubmit("Snap video cuts to musical audio beat transients.")}
+                      className="text-left text-[11px] p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors"
+                    >
+                      🎵 Snap to Beats
+                    </button>
+                    <button
                       onClick={() => handleAgentSubmit("Format composition to 9:16 vertical TikTok/Reels.")}
                       className="text-left text-[11px] p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors"
                     >
@@ -1103,6 +1253,30 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           <span>{msg.durationText || "Director Action"}</span>
                         </div>
                         <p className="text-xs text-[#F4F4F2] leading-relaxed">{msg.text}</p>
+
+                        {/* Structured Actions Taken */}
+                        {msg.actionsTaken && msg.actionsTaken.length > 0 && (
+                          <div className="pt-1 space-y-1 border-t border-white/5">
+                            {msg.actionsTaken.map((act, idx) => (
+                              <div key={idx} className="text-[10px] text-zinc-300 flex items-center gap-1.5 font-mono">
+                                <Check size={10} className="text-[#34D399] shrink-0" />
+                                <span>{act.description}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Revert This AI Edit Button */}
+                        {msg.previousTimeline && (
+                          <button
+                            onClick={() => handleUpdateTimeline(msg.previousTimeline!)}
+                            className="mt-1.5 text-[10px] font-mono text-zinc-400 hover:text-amber-300 flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2 py-1 rounded-lg transition-colors border border-white/5"
+                            title="Revert timeline back to state before this edit"
+                          >
+                            <RotateCcw size={10} />
+                            <span>Revert This AI Edit</span>
+                          </button>
+                        )}
                       </div>
                     )}
                     {msg.sender === "user" && (
@@ -1484,29 +1658,223 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   )}
                 </div>
               ) : (
-                /* Storyboard Editor Tab */
+                /* Storyboard Multi-Tab Inspector (Module 5) */
                 <div className="w-full h-full p-4 overflow-y-auto space-y-3 flex flex-col">
-                  <div className="flex items-center justify-between shrink-0">
-                    <span className="text-xs font-semibold text-white">STORYBOARD.md Directives</span>
-                    <button
-                      onClick={async () => {
-                        if (!activeProject) return;
-                        setIsSavingStoryboard(true);
-                        await saveFile(activeProject.id, "STORYBOARD.md", storyboardContent);
-                        setIsSavingStoryboard(false);
-                      }}
-                      disabled={isSavingStoryboard}
-                      className="pill-mint text-[11px] py-1 px-3"
-                    >
-                      {isSavingStoryboard ? "Saving..." : "Save Storyboard"}
-                    </button>
+                  {/* Sub-tab Navigation */}
+                  <div className="flex items-center justify-between shrink-0 border-b border-white/[0.08] pb-2">
+                    <div className="flex items-center gap-1.5 p-0.5 bg-[#222220] rounded-xl border border-white/5">
+                      <button
+                        onClick={() => setStoryboardSubTab("beats")}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
+                          storyboardSubTab === "beats"
+                            ? "bg-white text-black font-semibold shadow"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <Film size={12} />
+                        <span>Scene Beats</span>
+                      </button>
+                      <button
+                        onClick={() => setStoryboardSubTab("brand")}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
+                          storyboardSubTab === "brand"
+                            ? "bg-white text-black font-semibold shadow"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <Palette size={12} />
+                        <span>Brand Kit</span>
+                      </button>
+                      <button
+                        onClick={() => setStoryboardSubTab("dom")}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
+                          storyboardSubTab === "dom"
+                            ? "bg-white text-black font-semibold shadow"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <Code size={12} />
+                        <span>HyperFrames DOM</span>
+                      </button>
+                    </div>
+
+                    {/* Sub-tab Action Button */}
+                    {storyboardSubTab === "beats" && (
+                      <button
+                        onClick={async () => {
+                          if (!activeProject) return;
+                          setIsSavingStoryboard(true);
+                          await saveFile(activeProject.id, "STORYBOARD.md", storyboardContent);
+                          setIsSavingStoryboard(false);
+                        }}
+                        disabled={isSavingStoryboard}
+                        className="pill-mint text-[11px] py-1 px-3 flex items-center gap-1.5"
+                      >
+                        {isSavingStoryboard ? <RefreshCw size={11} className="animate-spin" /> : <Check size={11} />}
+                        <span>{isSavingStoryboard ? "Saving..." : "Save Storyboard"}</span>
+                      </button>
+                    )}
+
+                    {storyboardSubTab === "brand" && (
+                      <button
+                        onClick={async () => {
+                          if (!activeProject) return;
+                          setIsSavingFrame(true);
+                          await saveFile(activeProject.id, "frame.md", frameContent);
+                          setIsSavingFrame(false);
+                        }}
+                        disabled={isSavingFrame}
+                        className="pill-mint text-[11px] py-1 px-3 flex items-center gap-1.5"
+                      >
+                        {isSavingFrame ? <RefreshCw size={11} className="animate-spin" /> : <Check size={11} />}
+                        <span>{isSavingFrame ? "Saving..." : "Save Brand Kit"}</span>
+                      </button>
+                    )}
+
+                    {storyboardSubTab === "dom" && (
+                      <button
+                        onClick={() => {
+                          if (timelineState) {
+                            navigator.clipboard.writeText(serializeTimelineToHtml(timelineState, activeProject?.title));
+                            setCopiedHtml(true);
+                            setTimeout(() => setCopiedHtml(false), 2000);
+                          }
+                        }}
+                        className="pill-mint text-[11px] py-1 px-3 flex items-center gap-1.5"
+                      >
+                        {copiedHtml ? <CheckCircle2 size={11} className="text-emerald-950" /> : <Copy size={11} />}
+                        <span>{copiedHtml ? "Copied!" : "Copy HTML"}</span>
+                      </button>
+                    )}
                   </div>
-                  <textarea
-                    value={storyboardContent}
-                    onChange={(e) => setStoryboardContent(e.target.value)}
-                    className="w-full flex-1 min-h-[300px] bg-[#222220] border border-white/10 rounded-xl p-3.5 text-xs text-[#F4F4F2] outline-none font-mono leading-relaxed resize-none"
-                    placeholder="# Storyboard Narrative Beats..."
-                  />
+
+                  {/* Sub-tab 1: Scene Beats */}
+                  {storyboardSubTab === "beats" && (
+                    <div className="flex-1 flex flex-col space-y-3 min-h-0">
+                      {/* Visual Timeline Scene Beats Table */}
+                      <div className="bg-[#222220] border border-white/5 rounded-xl p-3 max-h-48 overflow-y-auto shrink-0 space-y-1.5">
+                        <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 flex justify-between">
+                          <span>Live Timeline Beats ({timelineState?.clips.length || 0})</span>
+                          <span>Duration: {timelineState?.duration.toFixed(1)}s</span>
+                        </div>
+                        {(!timelineState || timelineState.clips.length === 0) ? (
+                          <div className="text-xs text-zinc-500 py-3 text-center">
+                            No scene clips yet. Upload video or add text from the right panel.
+                          </div>
+                        ) : (
+                          timelineState.clips
+                            .slice()
+                            .sort((a, b) => a.start - b.start)
+                            .map((clip, idx) => (
+                              <div
+                                key={clip.id}
+                                onClick={() => {
+                                  setSelectedClipId(clip.id);
+                                  handleSeek(clip.start);
+                                }}
+                                className={`flex items-center justify-between text-xs p-2 rounded-lg cursor-pointer transition-colors ${
+                                  selectedClipId === clip.id
+                                    ? "bg-[#34D399]/15 border border-[#34D399]/40 text-white"
+                                    : "bg-white/[0.03] hover:bg-white/[0.07] text-zinc-300"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="font-mono text-[10px] text-zinc-500 w-4">{idx + 1}</span>
+                                  <span
+                                    className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase ${
+                                      clip.type === "video"
+                                        ? "bg-emerald-500/20 text-emerald-300"
+                                        : clip.type === "audio"
+                                        ? "bg-teal-500/20 text-teal-300"
+                                        : "bg-amber-500/20 text-amber-300"
+                                    }`}
+                                  >
+                                    T{clip.trackIndex} {clip.type}
+                                  </span>
+                                  <span className="truncate text-xs font-medium">{clip.text || clip.name}</span>
+                                </div>
+                                <div className="font-mono text-[10px] text-zinc-400 shrink-0 ml-2">
+                                  {clip.start.toFixed(1)}s - {(clip.start + clip.duration).toFixed(1)}s ({clip.duration.toFixed(1)}s)
+                                </div>
+                              </div>
+                            ))
+                        )}
+                      </div>
+
+                      {/* STORYBOARD.md Editor */}
+                      <div className="flex-1 flex flex-col min-h-0">
+                        <label className="text-[10px] font-mono text-zinc-400 mb-1">
+                          STORYBOARD.md Directives
+                        </label>
+                        <textarea
+                          value={storyboardContent}
+                          onChange={(e) => setStoryboardContent(e.target.value)}
+                          className="w-full flex-1 min-h-[160px] bg-[#222220] border border-white/10 rounded-xl p-3.5 text-xs text-[#F4F4F2] outline-none font-mono leading-relaxed resize-none focus:border-[#34D399]/50"
+                          placeholder="# Storyboard Narrative Beats...&#10;- Beat 1 (0.0s - 3.5s): Hook & speaker introduction&#10;- Beat 2 (3.5s - 7.0s): Amber serif quote reveal&#10;- Beat 3 (7.0s - 12.0s): Call to action"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sub-tab 2: Brand Kit (frame.md) */}
+                  {storyboardSubTab === "brand" && (
+                    <div className="flex-1 flex flex-col space-y-3 min-h-0">
+                      {/* Brand Token Swatches */}
+                      <div className="grid grid-cols-4 gap-2 shrink-0">
+                        <div className="bg-[#222220] border border-white/10 rounded-xl p-2.5">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="w-3.5 h-3.5 rounded-full bg-[#34D399] shadow-sm border border-black/40" />
+                            <span className="text-[11px] font-bold text-white">Mint</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-400">#34D399</span>
+                        </div>
+                        <div className="bg-[#222220] border border-white/10 rounded-xl p-2.5">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="w-3.5 h-3.5 rounded-full bg-[#FBBF24] shadow-sm border border-black/40" />
+                            <span className="text-[11px] font-bold text-white">Amber</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-400">#FBBF24</span>
+                        </div>
+                        <div className="bg-[#222220] border border-white/10 rounded-xl p-2.5">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="w-3.5 h-3.5 rounded-full bg-[#0F0F0E] shadow-sm border border-white/20" />
+                            <span className="text-[11px] font-bold text-white">Canvas</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-400">#0F0F0E</span>
+                        </div>
+                        <div className="bg-[#222220] border border-white/10 rounded-xl p-2.5">
+                          <div className="text-[11px] font-bold text-white truncate">Playfair / Inter</div>
+                          <span className="text-[10px] font-mono text-zinc-400">Typography</span>
+                        </div>
+                      </div>
+
+                      {/* frame.md Editor */}
+                      <div className="flex-1 flex flex-col min-h-0">
+                        <label className="text-[10px] font-mono text-zinc-400 mb-1">
+                          frame.md Design Tokens &amp; Styles
+                        </label>
+                        <textarea
+                          value={frameContent}
+                          onChange={(e) => setFrameContent(e.target.value)}
+                          className="w-full flex-1 min-h-[160px] bg-[#222220] border border-white/10 rounded-xl p-3.5 text-xs text-[#F4F4F2] outline-none font-mono leading-relaxed resize-none focus:border-[#34D399]/50"
+                          placeholder="# BRAND KIT & DESIGN TOKENS..."
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sub-tab 3: HyperFrames DOM (index.html) */}
+                  {storyboardSubTab === "dom" && (
+                    <div className="flex-1 flex flex-col min-h-0 space-y-2">
+                      <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
+                        <span>Live HyperFrames HTML Composition</span>
+                        <span>Deterministic DOM</span>
+                      </div>
+                      <pre className="flex-1 min-h-[220px] bg-[#121211] border border-white/10 rounded-xl p-3.5 text-[11px] text-zinc-300 font-mono overflow-auto leading-relaxed select-all">
+                        <code>{timelineState ? serializeTimelineToHtml(timelineState, activeProject?.title) : "<!-- No timeline loaded -->"}</code>
+                      </pre>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2003,23 +2371,34 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     {/* 1. Media Tab */}
                     {builderTab === "media" && (
                       <div className="space-y-3">
-                        <button
-                          onClick={() => fileUploadInputRef.current?.click()}
-                          disabled={isUploadingLocalMedia}
-                          className="w-full py-2.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors"
-                        >
-                          {isUploadingLocalMedia ? (
-                            <>
-                              <RefreshCw size={14} className="animate-spin text-[#34D399]" />
-                              <span>Importing media...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Plus size={14} className="text-[#34D399]" />
-                              <span>+ Upload Local Media</span>
-                            </>
-                          )}
-                        </button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => fileUploadInputRef.current?.click()}
+                            disabled={isUploadingLocalMedia}
+                            className="py-2.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-colors"
+                          >
+                            {isUploadingLocalMedia ? (
+                              <>
+                                <RefreshCw size={13} className="animate-spin text-[#34D399]" />
+                                <span>Importing...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus size={13} className="text-[#34D399]" />
+                                <span>+ Upload Media</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            onClick={handleLoadSampleFootage}
+                            className="py-2.5 px-3 rounded-xl bg-[#34D399]/10 hover:bg-[#34D399]/20 border border-[#34D399]/30 text-xs font-semibold text-[#34D399] flex items-center justify-center gap-1.5 transition-colors"
+                            title="Generate and load procedural sample videos and audio track"
+                          >
+                            <Film size={13} />
+                            <span>Sample Clips</span>
+                          </button>
+                        </div>
 
                         <div className="space-y-2">
                           <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">
@@ -2079,8 +2458,29 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     {/* 2. Text Tab */}
                     {builderTab === "text" && (
                       <div className="space-y-2.5">
-                        <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">
-                          One-Click Text Presets
+                        {/* 1-Click AI Auto-Captions Generator */}
+                        <div
+                          onClick={() => handleAgentSubmit("Generate synchronized dynamic kinetic Amber captions for this reel with serif emphasis.")}
+                          className="bg-gradient-to-r from-amber-500/15 via-emerald-500/10 to-amber-500/10 border border-amber-500/30 hover:border-amber-400/60 p-3 rounded-xl cursor-pointer transition-all hover:-translate-y-0.5 group shadow-lg"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Sparkles size={14} className="text-amber-400 animate-pulse" />
+                              <span className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">
+                                AI Auto-Captions (1-Click)
+                              </span>
+                            </div>
+                            <span className="text-[9.5px] bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full font-mono font-bold">
+                              Kinetic
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-zinc-300 mt-1 leading-relaxed">
+                            Automatically place synchronized Amber Serif glow captions on Track 0.
+                          </p>
+                        </div>
+
+                        <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-500 pt-1">
+                          Manual Text Presets
                         </div>
                         {[
                           { id: "heading", title: "Add Heading", desc: "Bold cinematic title", type: "heading" as const },
@@ -2285,7 +2685,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         )}
       </footer>
 
-      {/* ── Universal Video Export Modal (Phase 6) ── */}
+      {/* ── Universal Dual Export Modal (Module 5) ── */}
       {isExportModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#181817] border border-white/10 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
@@ -2302,108 +2702,184 @@ export const StudioView: React.FC<StudioViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-zinc-300">Rendering Mode</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => setExportMode("browser")}
-                  className={`p-3 rounded-xl border text-left transition-all ${
-                    exportMode === "browser"
-                      ? "bg-[#34D399]/15 border-[#34D399] text-white"
-                      : "bg-[#222220] border-white/5 text-zinc-400 hover:text-white"
-                  }`}
-                >
-                  <div className="text-xs font-bold flex items-center gap-1">
-                    <span>Browser On-Device</span>
-                    <span className="text-[9px] bg-[#34D399] text-black px-1.5 py-0.2 rounded font-mono">Free</span>
-                  </div>
-                  <div className="text-[10px] text-zinc-400 mt-1">Zero cost, instant client rendering via Canvas</div>
-                </button>
-
-                <button
-                  onClick={() => isBackendOnline && setExportMode("local_cli")}
-                  disabled={!isBackendOnline}
-                  className={`p-3 rounded-xl border text-left transition-all ${
-                    !isBackendOnline
-                      ? "opacity-40 cursor-not-allowed bg-[#222220] border-white/5 text-zinc-500"
-                      : exportMode === "local_cli"
-                      ? "bg-[#34D399]/15 border-[#34D399] text-white"
-                      : "bg-[#222220] border-white/5 text-zinc-400 hover:text-white"
-                  }`}
-                >
-                  <div className="text-xs font-bold">Local Pro CLI</div>
-                  <div className="text-[10px] text-zinc-400 mt-1">
-                    {isBackendOnline ? "HyperFrames headless Chrome + FFmpeg" : "Requires local FastAPI server"}
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {exportMode === "browser" && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-zinc-300">Quality</label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setExportResolution("1080p")}
-                    className={`flex-1 py-1.5 text-xs rounded-lg border font-mono ${
-                      exportResolution === "1080p" ? "bg-white text-black font-bold" : "bg-[#222220] border-white/10 text-zinc-400"
-                    }`}
-                  >
-                    1080p Full HD
-                  </button>
-                  <button
-                    onClick={() => setExportResolution("720p")}
-                    className={`flex-1 py-1.5 text-xs rounded-lg border font-mono ${
-                      exportResolution === "720p" ? "bg-white text-black font-bold" : "bg-[#222220] border-white/10 text-zinc-400"
-                    }`}
-                  >
-                    720p HD
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {isExporting && exportProgress && (
-              <div className="space-y-2 bg-[#222220] p-3 rounded-xl border border-white/10">
-                <div className="flex justify-between text-xs font-mono">
-                  <span className="text-[#34D399]">{exportProgress.statusText}</span>
-                  <span className="text-white font-bold">{exportProgress.progressPercent}%</span>
-                </div>
-                <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                  <div
-                    style={{ width: `${exportProgress.progressPercent}%` }}
-                    className="h-full bg-[#34D399] transition-all duration-150"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-2 pt-2">
+            {/* Dual Export Mode Tabs */}
+            <div className="flex items-center p-1 bg-[#222220] rounded-xl border border-white/5">
               <button
-                onClick={() => setIsExportModalOpen(false)}
-                disabled={isExporting}
-                className="pill-dark text-xs py-2 px-4 text-zinc-400 hover:text-white"
+                onClick={() => setExportTab("video")}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  exportTab === "video"
+                    ? "bg-white text-black shadow"
+                    : "text-zinc-400 hover:text-white"
+                }`}
               >
-                Cancel
+                <Film size={13} />
+                <span>Render Video</span>
               </button>
               <button
-                onClick={handleStartExport}
-                disabled={isExporting}
-                className="pill-mint text-xs py-2 px-5 font-bold flex items-center gap-2"
+                onClick={() => setExportTab("zip")}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  exportTab === "zip"
+                    ? "bg-white text-black shadow"
+                    : "text-zinc-400 hover:text-white"
+                }`}
               >
-                {isExporting ? (
-                  <>
-                    <RefreshCw size={13} className="animate-spin" />
-                    <span>Rendering...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download size={13} />
-                    <span>Render &amp; Download Video</span>
-                  </>
+                <FileArchive size={13} />
+                <span>CLI Project (.zip)</span>
+              </button>
+            </div>
+
+            {exportTab === "video" ? (
+              <>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-zinc-300">Rendering Mode</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setExportMode("browser")}
+                      className={`p-3 rounded-xl border text-left transition-all ${
+                        exportMode === "browser"
+                          ? "bg-[#34D399]/15 border-[#34D399] text-white"
+                          : "bg-[#222220] border-white/5 text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      <div className="text-xs font-bold flex items-center gap-1">
+                        <span>Browser On-Device</span>
+                        <span className="text-[9px] bg-[#34D399] text-black px-1.5 py-0.2 rounded font-mono">Free</span>
+                      </div>
+                      <div className="text-[10px] text-zinc-400 mt-1">Zero cost, instant client rendering via Canvas</div>
+                    </button>
+
+                    <button
+                      onClick={() => isBackendOnline && setExportMode("local_cli")}
+                      disabled={!isBackendOnline}
+                      className={`p-3 rounded-xl border text-left transition-all ${
+                        !isBackendOnline
+                          ? "opacity-40 cursor-not-allowed bg-[#222220] border-white/5 text-zinc-500"
+                          : exportMode === "local_cli"
+                          ? "bg-[#34D399]/15 border-[#34D399] text-white"
+                          : "bg-[#222220] border-white/5 text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      <div className="text-xs font-bold">Local Pro CLI</div>
+                      <div className="text-[10px] text-zinc-400 mt-1">
+                        {isBackendOnline ? "HyperFrames headless Chrome + FFmpeg" : "Requires local FastAPI server"}
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                {exportMode === "browser" && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-zinc-300">Quality</label>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setExportResolution("1080p")}
+                        className={`flex-1 py-1.5 text-xs rounded-lg border font-mono ${
+                          exportResolution === "1080p" ? "bg-white text-black font-bold" : "bg-[#222220] border-white/10 text-zinc-400"
+                        }`}
+                      >
+                        1080p Full HD
+                      </button>
+                      <button
+                        onClick={() => setExportResolution("720p")}
+                        className={`flex-1 py-1.5 text-xs rounded-lg border font-mono ${
+                          exportResolution === "720p" ? "bg-white text-black font-bold" : "bg-[#222220] border-white/10 text-zinc-400"
+                        }`}
+                      >
+                        720p HD
+                      </button>
+                    </div>
+                  </div>
                 )}
-              </button>
-            </div>
+
+                {isExporting && exportProgress && (
+                  <div className="space-y-2 bg-[#222220] p-3 rounded-xl border border-white/10">
+                    <div className="flex justify-between text-xs font-mono">
+                      <span className="text-[#34D399]">{exportProgress.statusText}</span>
+                      <span className="text-white font-bold">{exportProgress.progressPercent}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        style={{ width: `${exportProgress.progressPercent}%` }}
+                        className="h-full bg-[#34D399] transition-all duration-150"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    onClick={() => setIsExportModalOpen(false)}
+                    disabled={isExporting}
+                    className="pill-dark text-xs py-2 px-4 text-zinc-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleStartExport}
+                    disabled={isExporting}
+                    className="pill-mint text-xs py-2 px-5 font-bold flex items-center gap-2"
+                  >
+                    {isExporting ? (
+                      <>
+                        <RefreshCw size={13} className="animate-spin" />
+                        <span>Rendering...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={13} />
+                        <span>Render &amp; Download Video</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* ZIP Project Bundle Export Tab */
+              <div className="space-y-3">
+                <div className="bg-[#222220] border border-white/5 rounded-xl p-3.5 space-y-2 text-xs text-zinc-300">
+                  <p className="font-semibold text-white flex items-center gap-1.5">
+                    <FileArchive size={14} className="text-[#34D399]" />
+                    <span>HyperFrames CLI Project Bundle</span>
+                  </p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Downloads an independent, self-contained project package that can be compiled headlessly anywhere using the HyperFrames CLI:
+                  </p>
+                  <ul className="text-[10.5px] font-mono text-zinc-400 space-y-1 list-disc pl-4">
+                    <li><code className="text-[#34D399]">index.html</code> (Deterministic DOM layout)</li>
+                    <li><code className="text-[#34D399]">meta.json</code> (Aspect ratio, FPS, duration)</li>
+                    <li><code className="text-[#34D399]">STORYBOARD.md</code> &amp; <code className="text-[#34D399]">frame.md</code> (Tokens)</li>
+                    <li><code className="text-[#34D399]">render.sh</code> (CLI headless render script)</li>
+                  </ul>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    onClick={() => setIsExportModalOpen(false)}
+                    disabled={isExporting}
+                    className="pill-dark text-xs py-2 px-4 text-zinc-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleExportZipBundle}
+                    disabled={isExporting}
+                    className="pill-mint text-xs py-2.5 px-5 font-bold flex items-center gap-2"
+                  >
+                    {isExporting ? (
+                      <>
+                        <RefreshCw size={13} className="animate-spin" />
+                        <span>Packaging ZIP...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={13} />
+                        <span>Download .zip Bundle</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2449,7 +2925,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   onChange={(e) => setByokState({ ...byokSettings, provider: e.target.value as any })}
                   className="w-full bg-[#222220] border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none"
                 >
-                  <option value="gemini">Google Gemini (Default: gemini-2.5-flash / Free)</option>
+                  <option value="gemini">Google Gemini (Default: gemini-3.8-flash / Free)</option>
                   <option value="openai">OpenAI (gpt-4o / gpt-4o-mini)</option>
                   <option value="anthropic">Anthropic (Claude 3.5 Sonnet)</option>
                   <option value="openrouter">OpenRouter (Groq / Open Weights)</option>
@@ -2461,15 +2937,59 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <label className="text-xs font-semibold text-zinc-300 block mb-1">API Key</label>
                 <input
                   type="password"
-                  placeholder="AIzaSy... or sk-..."
+                  placeholder="AIzaSy... or AQ... or sk-..."
                   value={byokSettings.apiKey}
                   onChange={(e) => setByokState({ ...byokSettings, apiKey: e.target.value })}
                   className="w-full bg-[#222220] border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-mono outline-none"
                 />
               </div>
 
+              {/* Gemini Model Selector with Auto-Discovery & Fallback Cascade */}
+              {byokSettings.provider === "gemini" && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-zinc-300">Gemini Model</label>
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomModel(!isCustomModel)}
+                      className="text-[10px] text-[#34D399] hover:underline font-mono"
+                    >
+                      {isCustomModel ? "Pick from verified" : "+ Custom Model ID"}
+                    </button>
+                  </div>
+
+                  {isCustomModel ? (
+                    <input
+                      type="text"
+                      placeholder="e.g. gemini-3.8-flash, gemini-3.5-flash-lite"
+                      value={byokSettings.model || ""}
+                      onChange={(e) => setByokState({ ...byokSettings, model: e.target.value })}
+                      className="w-full bg-[#222220] border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-mono outline-none"
+                    />
+                  ) : (
+                    <select
+                      value={byokSettings.model || "gemini-3.8-flash"}
+                      onChange={(e) => setByokState({ ...byokSettings, model: e.target.value })}
+                      className="w-full bg-[#222220] border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-mono outline-none"
+                    >
+                      {(byokSettings.discoveredModels && byokSettings.discoveredModels.length > 0
+                        ? byokSettings.discoveredModels
+                        : GEMINI_MODEL_CASCADE
+                      ).map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <p className="text-[10px] text-zinc-500 mt-1">
+                    Auto-fallback cascade enabled: tries modern flash models first with x-goog-api-key header.
+                  </p>
+                </div>
+              )}
+
               {byokStatusText && (
-                <div className="text-xs font-mono p-2 rounded-lg bg-[#222220] text-zinc-300 border border-white/5">
+                <div className="text-xs font-mono p-2 rounded-lg bg-[#222220] text-zinc-300 border border-white/5 break-all">
                   {byokStatusText}
                 </div>
               )}
@@ -2493,7 +3013,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   className="pill-mint text-xs py-2 px-4 font-bold flex items-center gap-1.5"
                 >
                   {isTestingKey && <RefreshCw size={12} className="animate-spin" />}
-                  <span>Test &amp; Save Key</span>
+                  <span>{byokSettings.provider === "gemini" ? "Verify Key & Load Models" : "Test & Save Key"}</span>
                 </button>
               </div>
             </div>

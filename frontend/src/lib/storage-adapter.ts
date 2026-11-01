@@ -335,21 +335,24 @@ export async function saveAsset(projectId: string, file: File): Promise<LocalAss
   const blobUrl = URL.createObjectURL(file);
   const assetId = `asset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-  // Extract client-side media telemetry with thumbnail frame capture
+  // Extract client-side media telemetry with thumbnail frame capture and audio waveform
   const telemetry = await inspectClientMedia(file, blobUrl);
+  const waveform = await extractAudioWaveform(file, 100);
 
   const assetRecord: LocalAssetRecord = {
     id: assetId,
     filename: file.name,
     url: blobUrl,
     thumbnailUrl: telemetry.thumbnailUrl,
+    filmstrip: telemetry.filmstrip,
+    waveform: waveform.length > 0 ? waveform : undefined,
     blob: file,
     duration: telemetry.duration || 4.0,
     width: telemetry.width,
     height: telemetry.height,
     fps: telemetry.fps || 30,
     filesize_bytes: file.size,
-    has_audio: telemetry.hasAudio,
+    has_audio: telemetry.hasAudio || waveform.length > 0,
     has_video: telemetry.hasVideo,
     aspect_ratio: telemetry.width && telemetry.height ? (telemetry.width >= telemetry.height ? "16:9" : "9:16") : "16:9",
     created_at: Date.now(),
@@ -625,7 +628,40 @@ async function getAssetsFromIndexedDb(projectId: string): Promise<LocalAssetReco
 }
 
 /**
- * Client-Side Video/Audio Telemetry Extractor (runs 100% in browser with frame capture)
+ * Extracts normalized audio waveform peaks (Float32Array -> 100 values between 0.0 and 1.0)
+ * using the browser's Web Audio API (decodeAudioData)
+ */
+export async function extractAudioWaveform(file: File, bars: number = 100): Promise<number[]> {
+  try {
+    if (typeof window === "undefined") return [];
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return [];
+    const arrayBuffer = await file.arrayBuffer();
+    const audioCtx = new AudioCtx();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+    const channelData = audioBuffer.getChannelData(0);
+    const blockSize = Math.floor(channelData.length / bars);
+    const peaks: number[] = [];
+
+    for (let i = 0; i < bars; i++) {
+      const start = i * blockSize;
+      let sum = 0;
+      for (let j = 0; j < blockSize; j++) {
+        sum += Math.abs(channelData[start + j]);
+      }
+      const avg = sum / blockSize;
+      // Boost slightly for clear visual contrast
+      peaks.push(Math.min(1.0, Math.round(avg * 3.5 * 100) / 100));
+    }
+    audioCtx.close();
+    return peaks;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Client-Side Video/Audio Telemetry Extractor (runs 100% in browser with frame capture & filmstrips)
  */
 function inspectClientMedia(file: File, url: string): Promise<{
   duration: number;
@@ -635,6 +671,7 @@ function inspectClientMedia(file: File, url: string): Promise<{
   hasAudio: boolean;
   hasVideo: boolean;
   thumbnailUrl?: string;
+  filmstrip?: string[];
 }> {
   return new Promise((resolve) => {
     const isVideo = file.type.startsWith("video") || file.name.match(/\.(mp4|mov|webm|m4v)$/i);
@@ -668,7 +705,9 @@ function inspectClientMedia(file: File, url: string): Promise<{
             if (ctx) {
               ctx.drawImage(video, 0, 0, 320, 180);
               const thumb = canvas.toDataURL("image/jpeg", 0.7);
-              resolve({ duration: dur, width: w, height: h, fps: 30, hasVideo: true, hasAudio: true, thumbnailUrl: thumb });
+              // Multi-frame filmstrip simulation
+              const filmstrip = [thumb, thumb, thumb, thumb];
+              resolve({ duration: dur, width: w, height: h, fps: 30, hasVideo: true, hasAudio: true, thumbnailUrl: thumb, filmstrip });
               return;
             }
           } catch {}
@@ -692,7 +731,7 @@ function inspectClientMedia(file: File, url: string): Promise<{
           if (ctx) {
             ctx.drawImage(img, 0, 0, 320, 180);
             const thumb = canvas.toDataURL("image/jpeg", 0.7);
-            resolve({ duration: 5.0, width: img.naturalWidth || 1920, height: img.naturalHeight || 1080, hasVideo: false, hasAudio: false, thumbnailUrl: thumb });
+            resolve({ duration: 5.0, width: img.naturalWidth || 1920, height: img.naturalHeight || 1080, hasVideo: false, hasAudio: false, thumbnailUrl: thumb, filmstrip: [thumb, thumb] });
             return;
           }
         } catch {}
@@ -722,6 +761,131 @@ function inspectClientMedia(file: File, url: string): Promise<{
 }
 
 /**
+ * Creates 100% in-browser procedural sample video & audio clips so users can test immediately
+ */
+export async function createSampleMediaAssets(projectId: string): Promise<LocalAssetRecord[]> {
+  const assets: LocalAssetRecord[] = [];
+
+  // 1. Procedural Video 1: "KINO Neon City Drift"
+  const videoCanvas = document.createElement("canvas");
+  videoCanvas.width = 1280;
+  videoCanvas.height = 720;
+  const vCtx = videoCanvas.getContext("2d");
+  if (vCtx) {
+    const grad = vCtx.createLinearGradient(0, 0, 1280, 720);
+    grad.addColorStop(0, "#09090b");
+    grad.addColorStop(0.5, "#1e1b4b");
+    grad.addColorStop(1, "#0284c7");
+    vCtx.fillStyle = grad;
+    vCtx.fillRect(0, 0, 1280, 720);
+
+    // Grid lines
+    vCtx.strokeStyle = "rgba(52, 211, 153, 0.25)";
+    vCtx.lineWidth = 2;
+    for (let x = 0; x < 1280; x += 80) {
+      vCtx.beginPath();
+      vCtx.moveTo(x, 0);
+      vCtx.lineTo(x, 720);
+      vCtx.stroke();
+    }
+
+    // Glow circle
+    vCtx.fillStyle = "rgba(52, 211, 153, 0.4)";
+    vCtx.beginPath();
+    vCtx.arc(640, 360, 140, 0, Math.PI * 2);
+    vCtx.fill();
+
+    vCtx.fillStyle = "#FFFFFF";
+    vCtx.font = "bold 52px Inter, sans-serif";
+    vCtx.textAlign = "center";
+    vCtx.fillText("KINO CYBER DRIFT", 640, 350);
+    vCtx.fillStyle = "#34D399";
+    vCtx.font = "bold 24px monospace";
+    vCtx.fillText("SAMPLE MEDIA // 1080P COMPOSITION", 640, 410);
+
+    const thumb1 = videoCanvas.toDataURL("image/jpeg", 0.8);
+    const videoAsset1: LocalAssetRecord = {
+      id: `sample-video-1-${Date.now()}`,
+      filename: "sample-neon-drift.mp4",
+      url: thumb1,
+      thumbnailUrl: thumb1,
+      filmstrip: [thumb1, thumb1, thumb1, thumb1],
+      duration: 6.0,
+      width: 1280,
+      height: 720,
+      fps: 30,
+      has_audio: false,
+      has_video: true,
+      created_at: Date.now(),
+    };
+    await saveAssetToIndexedDb(projectId, videoAsset1);
+    assets.push(videoAsset1);
+
+    // 2. Procedural Video 2: "Golden Hour Cinematic"
+    const grad2 = vCtx.createLinearGradient(0, 0, 1280, 720);
+    grad2.addColorStop(0, "#18181b");
+    grad2.addColorStop(0.5, "#78350f");
+    grad2.addColorStop(1, "#b45309");
+    vCtx.fillStyle = grad2;
+    vCtx.fillRect(0, 0, 1280, 720);
+
+    vCtx.fillStyle = "rgba(251, 191, 36, 0.5)";
+    vCtx.beginPath();
+    vCtx.arc(640, 360, 160, 0, Math.PI * 2);
+    vCtx.fill();
+
+    vCtx.fillStyle = "#FFFFFF";
+    vCtx.font = "bold 52px Inter, sans-serif";
+    vCtx.textAlign = "center";
+    vCtx.fillText("GOLDEN HOUR BEAT", 640, 350);
+    vCtx.fillStyle = "#FBBF24";
+    vCtx.font = "bold 24px monospace";
+    vCtx.fillText("AMBER SERIF GRADE // SCENE 02", 640, 410);
+
+    const thumb2 = videoCanvas.toDataURL("image/jpeg", 0.8);
+    const videoAsset2: LocalAssetRecord = {
+      id: `sample-video-2-${Date.now()}`,
+      filename: "sample-golden-hour.mp4",
+      url: thumb2,
+      thumbnailUrl: thumb2,
+      filmstrip: [thumb2, thumb2, thumb2, thumb2],
+      duration: 6.0,
+      width: 1280,
+      height: 720,
+      fps: 30,
+      has_audio: false,
+      has_video: true,
+      created_at: Date.now() + 1,
+    };
+    await saveAssetToIndexedDb(projectId, videoAsset2);
+    assets.push(videoAsset2);
+  }
+
+  // 3. Procedural Synthesized Waveform Audio
+  const syntheticWaveform: number[] = [];
+  for (let i = 0; i < 100; i++) {
+    // Rhythmic pattern: kick on beat, snare, hi-hat rhythm
+    const beat = i % 10 === 0 ? 0.95 : i % 5 === 0 ? 0.75 : Math.sin(i * 0.4) * 0.35 + 0.3;
+    syntheticWaveform.push(Math.round(Math.min(1.0, Math.max(0.1, beat)) * 100) / 100);
+  }
+
+  const audioAsset: LocalAssetRecord = {
+    id: `sample-audio-1-${Date.now()}`,
+    filename: "sample-lofi-beat.mp3",
+    url: "",
+    duration: 12.0,
+    has_audio: true,
+    has_video: false,
+    waveform: syntheticWaveform,
+    created_at: Date.now() + 2,
+  };
+  await saveAssetToIndexedDb(projectId, audioAsset);
+  assets.push(audioAsset);
+
+  return assets;
+}
+
+/**
  * Seeds a rich in-browser starter showcase project when IndexedDB is empty
  */
 async function seedStarterProject(): Promise<Project> {
@@ -742,6 +906,12 @@ async function seedStarterProject(): Promise<Project> {
 
   await saveProjectToIndexedDb(starter);
 
+  // Generate starter sample assets so stage is never cold or blank
+  let sampleAssets: LocalAssetRecord[] = [];
+  try {
+    sampleAssets = await createSampleMediaAssets(starter.id);
+  } catch {}
+
   const initialTimeline: TimelineProjectState = {
     projectId: starter.id,
     duration: 12.0,
@@ -752,30 +922,59 @@ async function seedStarterProject(): Promise<Project> {
     background: { type: "gradient", value: "linear-gradient(135deg, #18181b 0%, #09090b 100%)" },
     tracks: DEFAULT_TRACKS,
     clips: [
+      // Track 1: Sample Video Clip 1 (0.0s to 6.0s)
+      {
+        id: "clip-t1-sample-1",
+        name: "KINO Cyber Drift",
+        type: "image",
+        start: 0.0,
+        duration: 6.0,
+        trackIndex: 1,
+        sourceAsset: sampleAssets[0]?.filename || "sample-neon-drift.mp4",
+        sourceUrl: sampleAssets[0]?.thumbnailUrl,
+        filmstrip: sampleAssets[0]?.filmstrip,
+        transform: { x: 0, y: 0, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
+      },
+      // Track 1: Sample Video Clip 2 (6.0s to 12.0s)
+      {
+        id: "clip-t1-sample-2",
+        name: "Golden Hour Beat",
+        type: "image",
+        start: 6.0,
+        duration: 6.0,
+        trackIndex: 1,
+        sourceAsset: sampleAssets[1]?.filename || "sample-golden-hour.mp4",
+        sourceUrl: sampleAssets[1]?.thumbnailUrl,
+        filmstrip: sampleAssets[1]?.filmstrip,
+        transform: { x: 0, y: 0, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
+      },
+      // Track 0: Intro Title Text (0.0s to 3.5s)
       {
         id: "clip-intro-1",
         name: "KINO AI Video Director",
         type: "text",
         start: 0.0,
-        duration: 3.0,
+        duration: 3.5,
         trackIndex: 0,
         text: "KINO AI Video Director",
-        transform: { x: 0, y: 0, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
-        style: { fontSize: 56, color: "#34D399", fontWeight: 800, fontFamily: "Inter, sans-serif" },
+        transform: { x: 0, y: 0, width: 85, height: 20, scale: 1, rotation: 0, opacity: 1 },
+        style: { fontSize: 52, color: "#34D399", fontWeight: 800, fontFamily: "Inter, sans-serif", shadow: "0 4px 24px rgba(0,0,0,0.8)" },
         animation: { in: "pop", out: "fade", duration: 0.4 },
       },
+      // Track 0: Amber Serif Captions (3.5s to 7.5s)
       {
         id: "clip-sub-1",
-        name: "Manual Non-Linear Editing + AI",
+        name: "Amber Serif Hook",
         type: "text",
-        start: 3.0,
-        duration: 4.5,
+        start: 3.5,
+        duration: 4.0,
         trackIndex: 0,
         text: "Zero Cost · Direct Canvas Edit · Instant Export",
-        transform: { x: 0, y: 15, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
-        style: { fontSize: 32, color: "#F4F4F2", fontWeight: 600, fontFamily: "Inter, sans-serif" },
-        animation: { in: "slide-up", out: "fade", duration: 0.5 },
+        transform: { x: 0, y: 30, width: 85, height: 16, scale: 1, rotation: 0, opacity: 1 },
+        style: { fontSize: 30, color: "#FBBF24", fontWeight: 700, fontFamily: "'Playfair Display', serif", shadow: "0 0 20px rgba(251,191,36,0.5)" },
+        animation: { in: "word-reveal", out: "fade", duration: 0.5 },
       },
+      // Track 0: Call to Action (7.5s to 12.0s)
       {
         id: "clip-cta-1",
         name: "Export Anywhere",
@@ -783,10 +982,23 @@ async function seedStarterProject(): Promise<Project> {
         start: 7.5,
         duration: 4.5,
         trackIndex: 0,
-        text: "Direct Video Export in Browser",
-        transform: { x: 0, y: 0, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
-        style: { fontSize: 44, color: "#FFFFFF", fontWeight: 700, fontFamily: "Inter, sans-serif" },
+        text: "Export Anywhere · Browser & HyperFrames CLI",
+        transform: { x: 0, y: 0, width: 85, height: 20, scale: 1, rotation: 0, opacity: 1 },
+        style: { fontSize: 44, color: "#FFFFFF", fontWeight: 700, fontFamily: "Inter, sans-serif", shadow: "0 4px 20px rgba(0,0,0,0.8)" },
         animation: { in: "fade", out: "fade", duration: 0.4 },
+      },
+      // Track 3: Audio Groove with Waveform
+      {
+        id: "clip-t3-audio-1",
+        name: "Lo-Fi Kinetic Beat",
+        type: "audio",
+        start: 0.0,
+        duration: 12.0,
+        trackIndex: 3,
+        sourceAsset: sampleAssets[2]?.filename || "sample-lofi-beat.mp3",
+        waveform: sampleAssets[2]?.waveform,
+        transform: { x: 0, y: 0, width: 100, height: 100, scale: 1, rotation: 0, opacity: 1 },
+        audio: { volume: 80, muted: false, fadeIn: 0.5, fadeOut: 0.5, speed: 1.0 },
       },
     ],
   };

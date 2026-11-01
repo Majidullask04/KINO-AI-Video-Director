@@ -8,9 +8,27 @@ export interface ByokSettings {
   provider: "gemini" | "openai" | "anthropic" | "openrouter" | "local_cli";
   apiKey: string;
   model?: string;
+  customModel?: string;
+  discoveredModels?: string[];
+}
+
+export interface AiActionResult {
+  updatedTimeline: TimelineProjectState;
+  logMessage: string;
+  actionsTaken: Array<{ type: string; description: string }>;
+  source: "local_cli" | "byok_api" | "builtin_rule";
+  previousTimeline?: TimelineProjectState;
 }
 
 const BYOK_STORAGE_KEY = "kino_byok_settings";
+
+export const GEMINI_MODEL_CASCADE = [
+  "gemini-3.8-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-flash-latest",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+];
 
 export function getByokSettings(): ByokSettings {
   if (typeof window === "undefined") {
@@ -18,7 +36,14 @@ export function getByokSettings(): ByokSettings {
   }
   try {
     const raw = localStorage.getItem(BYOK_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const cachedActiveModel = localStorage.getItem("kino_active_gemini_model");
+      if (cachedActiveModel && !parsed.model) {
+        parsed.model = cachedActiveModel;
+      }
+      return parsed;
+    }
   } catch {}
   return { provider: "gemini", apiKey: "" };
 }
@@ -27,13 +52,154 @@ export function saveByokSettings(settings: ByokSettings): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(BYOK_STORAGE_KEY, JSON.stringify(settings));
+    if (settings.model) {
+      localStorage.setItem("kino_active_gemini_model", settings.model);
+    }
   } catch {}
 }
 
 /**
- * Validates an API key against the selected provider
+ * Discovers available Gemini models for this API key via GET /v1beta/models
+ * Filters for supportedGenerationMethods includes 'generateContent' and name includes 'gemini'.
+ * Strips 'models/' prefix to avoid models/models/ errors.
  */
-export async function testApiKey(settings: ByokSettings): Promise<{ ok: boolean; message: string }> {
+export async function discoverGeminiModels(apiKey: string): Promise<string[]> {
+  const key = apiKey.trim();
+  if (!key) return [];
+  try {
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": key,
+      },
+    });
+
+    if (!res.ok) {
+      // If Vertex AQ key, generativelanguage might return 403/404
+      return [];
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (!Array.isArray(data.models)) return [];
+
+    const discovered = data.models
+      .filter(
+        (m: any) =>
+          Array.isArray(m.supportedGenerationMethods) &&
+          m.supportedGenerationMethods.includes("generateContent") &&
+          typeof m.name === "string" &&
+          m.name.toLowerCase().includes("gemini")
+      )
+      .map((m: any) => m.name.replace(/^models\//, ""));
+
+    return discovered;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Calls Gemini with an automatic retry cascade across known models
+ * Supports Vertex AI Express mode for 'AQ.' keys
+ */
+export async function callGeminiWithCascade(
+  prompt: string,
+  systemPrompt: string,
+  apiKey: string,
+  preferredModel?: string
+): Promise<{ text: string; workingModel: string }> {
+  const key = apiKey.trim();
+  const isVertexAqKey = key.startsWith("AQ.");
+
+  // Build model priority cascade: preferred -> discovered/cascade
+  const tryModels = [
+    preferredModel,
+    ...GEMINI_MODEL_CASCADE,
+  ].filter((m, idx, arr): m is string => !!m && arr.indexOf(m) === idx);
+
+  let lastError = "";
+
+  for (const rawModel of tryModels) {
+    const cleanModel = rawModel.replace(/^models\//, "");
+    try {
+      // 1. Try Google AI Studio (generativelanguage.googleapis.com) with x-goog-api-key header
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": key,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: `${systemPrompt}\n\nUser Directives: ${prompt}` }],
+            },
+          ],
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        if (typeof window !== "undefined") {
+          localStorage.setItem("kino_active_gemini_model", cleanModel);
+        }
+        return { text, workingModel: cleanModel };
+      }
+
+      const errData = await res.json().catch(() => ({}));
+      lastError = errData?.error?.message || `HTTP ${res.status} (${res.statusText})`;
+
+      // If 404 (model not entitled) or 503 (overloaded), cascade to next candidate
+      if (res.status === 404 || res.status === 503) {
+        continue;
+      }
+
+      // If 403 or 404 on an AQ. key, try Vertex AI Express Mode endpoint
+      if (isVertexAqKey && (res.status === 403 || res.status === 404)) {
+        const vertexUrl = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${cleanModel}:generateContent`;
+        const vRes = await fetch(vertexUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": key,
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: `${systemPrompt}\n\nUser Directives: ${prompt}` }],
+              },
+            ],
+          }),
+        });
+
+        if (vRes.ok) {
+          const vData = await vRes.json();
+          const text = vData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          if (typeof window !== "undefined") {
+            localStorage.setItem("kino_active_gemini_model", cleanModel);
+          }
+          return { text, workingModel: cleanModel };
+        }
+      }
+    } catch (e: any) {
+      lastError = e.message;
+    }
+  }
+
+  throw new Error(`Gemini API: ${lastError || "All model endpoints returned an error."}`);
+}
+
+/**
+ * Validates an API key against the selected provider and auto-discovers models
+ */
+export async function testApiKey(
+  settings: ByokSettings
+): Promise<{ ok: boolean; message: string; workingModel?: string; discoveredModels?: string[] }> {
   if (settings.provider === "local_cli") {
     const online = await checkBackendAvailability(true);
     return online
@@ -48,14 +214,24 @@ export async function testApiKey(settings: ByokSettings): Promise<{ ok: boolean;
 
   try {
     if (settings.provider === "gemini") {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`, {
-        method: "GET",
-      });
-      if (res.ok) {
-        return { ok: true, message: "Google Gemini API connected successfully!" };
-      }
-      const data = await res.json().catch(() => ({}));
-      return { ok: false, message: data.error?.message || `Gemini check returned HTTP ${res.status}` };
+      // 1. Discover models via GET /v1beta/models
+      const discovered = await discoverGeminiModels(key);
+
+      // 2. Test actual generateContent with a tiny ping prompt
+      const preferred = settings.model || (discovered.length > 0 ? discovered[0] : "gemini-3.8-flash");
+      const result = await callGeminiWithCascade(
+        "Ping. Reply with: OK",
+        "You are an AI test probe. Reply with valid text.",
+        key,
+        preferred
+      );
+
+      return {
+        ok: true,
+        message: `✓ Connected (Using model: ${result.workingModel})`,
+        workingModel: result.workingModel,
+        discoveredModels: discovered,
+      };
     }
 
     if (settings.provider === "openai") {
@@ -63,7 +239,7 @@ export async function testApiKey(settings: ByokSettings): Promise<{ ok: boolean;
         headers: { Authorization: `Bearer ${key}` },
       });
       if (res.ok) {
-        return { ok: true, message: "OpenAI API connected successfully!" };
+        return { ok: true, message: "OpenAI API connected successfully!", workingModel: "gpt-4o" };
       }
       const data = await res.json().catch(() => ({}));
       return { ok: false, message: data.error?.message || `OpenAI check returned HTTP ${res.status}` };
@@ -74,15 +250,14 @@ export async function testApiKey(settings: ByokSettings): Promise<{ ok: boolean;
         headers: { Authorization: `Bearer ${key}` },
       });
       if (res.ok) {
-        return { ok: true, message: "OpenRouter connected successfully!" };
+        return { ok: true, message: "OpenRouter connected successfully!", workingModel: "google/gemini-2.5-flash" };
       }
       return { ok: false, message: `OpenRouter returned HTTP ${res.status}` };
     }
 
-    // Default basic check
-    return { ok: true, message: "Key format saved." };
+    return { ok: true, message: "Key saved successfully." };
   } catch (err: any) {
-    return { ok: false, message: `Connection failed: ${err.message}` };
+    return { ok: false, message: `Connection test failed: ${err.message}` };
   }
 }
 
@@ -96,11 +271,7 @@ export async function executeAiDirective(
   projectId: string,
   prompt: string,
   currentTimeline: TimelineProjectState
-): Promise<{
-  updatedTimeline: TimelineProjectState;
-  logMessage: string;
-  source: "local_cli" | "byok_api" | "builtin_rule";
-}> {
+): Promise<AiActionResult> {
   const byok = getByokSettings();
   const isOnline = await checkBackendAvailability();
 
@@ -111,7 +282,9 @@ export async function executeAiDirective(
       return {
         updatedTimeline: result.timeline,
         logMessage: result.message,
+        actionsTaken: result.actionsTaken,
         source: "byok_api",
+        previousTimeline: currentTimeline,
       };
     } catch (e: any) {
       console.warn("BYOK API call failed, falling back to built-in rules:", e);
@@ -135,7 +308,9 @@ export async function executeAiDirective(
         return {
           updatedTimeline: currentTimeline,
           logMessage: data.stdout || "Local agent modified composition on disk.",
+          actionsTaken: [{ type: "cli_plan", description: "Executed CLI agent plan" }],
           source: "local_cli",
+          previousTimeline: currentTimeline,
         };
       }
     } catch (e) {
@@ -148,7 +323,9 @@ export async function executeAiDirective(
   return {
     updatedTimeline: ruleResult.timeline,
     logMessage: ruleResult.message,
+    actionsTaken: ruleResult.actionsTaken,
     source: "builtin_rule",
+    previousTimeline: currentTimeline,
   };
 }
 
@@ -159,9 +336,10 @@ export async function executeAiDirective(
 export function executeBuiltinRule(
   prompt: string,
   timeline: TimelineProjectState
-): { timeline: TimelineProjectState; message: string } {
+): { timeline: TimelineProjectState; message: string; actionsTaken: Array<{ type: string; description: string }> } {
   const p = prompt.toLowerCase();
   let nextClips = [...timeline.clips];
+  const actionsTaken: Array<{ type: string; description: string }> = [];
 
   // Rule 1: Auto-split video into 2.5s pacing cuts
   if (p.includes("split") || p.includes("pace") || p.includes("rhythm") || p.includes("cut")) {
@@ -177,14 +355,13 @@ export function executeBuiltinRule(
         while (offset < vc.duration) {
           const dur = Math.min(segDuration, Math.round((vc.duration - offset) * 10) / 10);
           if (dur < 0.5 && splitClips.length > 0) {
-            // merge remainder with last clip
             splitClips[splitClips.length - 1].duration += dur;
             break;
           }
           splitClips.push({
             ...vc,
             id: `${vc.id}-seg-${count}-${Date.now()}`,
-            name: `${vc.name} (Cut ${count + 1})`,
+            name: `${vc.name} (Beat ${count + 1})`,
             start: vc.start + offset,
             duration: dur,
             trimStart: (vc.trimStart || 0) + offset,
@@ -197,15 +374,17 @@ export function executeBuiltinRule(
       }
     }
 
+    actionsTaken.push({ type: "split_clip", description: `Split video into ${splitClips.length} pacing cuts of 2.5s` });
+
     return {
       timeline: { ...timeline, clips: [...splitClips, ...otherClips] },
       message: `Built-in Rule: Sliced video into ${splitClips.length} dynamic 2.5s pacing cuts.`,
+      actionsTaken,
     };
   }
 
   // Rule 2: Amber Serif or Caption Styling
   if (p.includes("amber") || p.includes("caption") || p.includes("serif") || p.includes("subtitles")) {
-    // If text clips exist on T0, restyle them; if not, create new Amber captions synced across timeline
     const textClips = nextClips.filter((c) => c.type === "text" && c.trackIndex === 0);
     if (textClips.length > 0) {
       nextClips = nextClips.map((c) => {
@@ -224,8 +403,8 @@ export function executeBuiltinRule(
         }
         return c;
       });
+      actionsTaken.push({ type: "update_text_style", description: "Restyled captions to Amber Serif Glow" });
     } else {
-      // Create 2 Amber Caption clips along the timeline
       const duration = timeline.duration || 12.0;
       nextClips.push(
         {
@@ -267,16 +446,19 @@ export function executeBuiltinRule(
           animation: { in: "word-reveal", out: "fade", duration: 0.5 },
         }
       );
+      actionsTaken.push({ type: "add_text_overlay", description: "Added Amber Serif Reveal captions" });
     }
 
     return {
       timeline: { ...timeline, clips: nextClips },
       message: "Built-in Rule: Applied Amber Serif Glow captions across the timeline.",
+      actionsTaken,
     };
   }
 
-  // Rule 3: Format Canvas to 9:16 Vertical (TikTok/Reels)
+  // Rule 3: Format Canvas to 9:16 Vertical
   if (p.includes("9:16") || p.includes("vertical") || p.includes("tiktok") || p.includes("reel") || p.includes("shorts")) {
+    actionsTaken.push({ type: "set_aspect_ratio", description: "Canvas set to 9:16 Vertical (1080×1920)" });
     return {
       timeline: {
         ...timeline,
@@ -286,11 +468,13 @@ export function executeBuiltinRule(
         background: { type: "gradient", value: "linear-gradient(180deg, #181817 0%, #0A0A09 100%)" },
       },
       message: "Built-in Rule: Formatted stage canvas to 9:16 Vertical (1080×1920).",
+      actionsTaken,
     };
   }
 
-  // Rule 4: Format Canvas to 16:9 Landscape (YouTube)
+  // Rule 4: Format Canvas to 16:9 Landscape
   if (p.includes("16:9") || p.includes("landscape") || p.includes("youtube") || p.includes("horizontal")) {
+    actionsTaken.push({ type: "set_aspect_ratio", description: "Canvas set to 16:9 Landscape (1920×1080)" });
     return {
       timeline: {
         ...timeline,
@@ -300,11 +484,13 @@ export function executeBuiltinRule(
         background: { type: "color", value: "#0F0F0E" },
       },
       message: "Built-in Rule: Formatted stage canvas to 16:9 Landscape (1920×1080).",
+      actionsTaken,
     };
   }
 
-  // Rule 5: Format Canvas to 1:1 Square (Instagram)
+  // Rule 5: Format Canvas to 1:1 Square
   if (p.includes("1:1") || p.includes("square") || p.includes("feed")) {
+    actionsTaken.push({ type: "set_aspect_ratio", description: "Canvas set to 1:1 Square (1080×1080)" });
     return {
       timeline: {
         ...timeline,
@@ -314,6 +500,7 @@ export function executeBuiltinRule(
         background: { type: "color", value: "#000000" },
       },
       message: "Built-in Rule: Formatted stage canvas to 1:1 Square (1080×1080).",
+      actionsTaken,
     };
   }
 
@@ -321,9 +508,11 @@ export function executeBuiltinRule(
   if (p.includes("bw") || p.includes("noir") || p.includes("black and white") || p.includes("vintage") || p.includes("glow") || p.includes("contrast")) {
     const filter = p.includes("bw") || p.includes("noir") ? "bw" : p.includes("vintage") ? "vintage" : p.includes("glow") ? "glow" : "contrast";
     nextClips = nextClips.map((c) => (c.type === "video" ? { ...c, filter } : c));
+    actionsTaken.push({ type: "apply_video_filter", description: `Applied '${filter}' filter to video clips` });
     return {
       timeline: { ...timeline, clips: nextClips },
       message: `Built-in Rule: Applied '${filter}' color filter across video clips.`,
+      actionsTaken,
     };
   }
 
@@ -349,12 +538,15 @@ export function executeBuiltinRule(
     animation: { in: "pop", out: "fade", duration: 0.4 },
   };
 
+  actionsTaken.push({ type: "add_text_overlay", description: `Inserted headline: "${titleText}"` });
+
   return {
     timeline: {
       ...timeline,
       clips: [...nextClips, newTitleClip],
     },
-    message: `Built-in Rule: Inserted new headline layer: "${newTitleClip.text}".`,
+    message: `Built-in Rule: Inserted new headline layer: "${titleText}".`,
+    actionsTaken,
   };
 }
 
@@ -366,29 +558,36 @@ async function executeByokRequest(
   prompt: string,
   timeline: TimelineProjectState,
   byok: ByokSettings
-): Promise<{ timeline: TimelineProjectState; message: string }> {
+): Promise<{ timeline: TimelineProjectState; message: string; actionsTaken: Array<{ type: string; description: string }> }> {
   const systemPrompt = `You are an AI video director assistant. The user wants to modify their video timeline.
 Current timeline metadata: duration=${timeline.duration}s, width=${timeline.width}, height=${timeline.height}, aspectRatio=${timeline.aspectRatio}, totalClips=${timeline.clips.length}.
-Respond ONLY with a JSON object:
+Existing clips summary:
+${timeline.clips.map((c, i) => `[Clip ${i + 1}] id=${c.id}, name="${c.name}", type=${c.type}, start=${c.start}s, dur=${c.duration}s, track=${c.trackIndex}`).join("\n")}
+
+Respond ONLY with a JSON object conforming to this schema:
 {
-  "summary": "Brief description of changes made",
+  "summary": "Clear, concise sentence describing the exact changes made",
   "aspectRatio": "16:9" | "9:16" | "1:1",
   "actions": [
     {
-      "action": "add_text",
+      "action": "add_text_overlay",
       "text": "Caption text",
       "start": 0.0,
       "duration": 3.0,
-      "style": { "fontSize": 32, "color": "#FFFFFF", "fontFamily": "Inter, sans-serif" },
+      "style": { "fontSize": 32, "color": "#FFFFFF", "fontFamily": "Inter, sans-serif", "shadow": "0 2px 10px rgba(0,0,0,0.5)" },
       "animation": "pop" | "word-reveal" | "slide-up" | "fade"
     },
     {
-      "action": "split_clips",
+      "action": "split_clip",
       "interval": 2.5
     },
     {
-      "action": "set_filter",
+      "action": "apply_video_filter",
       "filter": "none" | "glow" | "bw" | "vintage" | "contrast"
+    },
+    {
+      "action": "set_playback_speed",
+      "speed": 1.0
     }
   ]
 }`;
@@ -396,22 +595,10 @@ Respond ONLY with a JSON object:
   let rawResponse = "";
 
   if (byok.provider === "gemini") {
-    const model = byok.model || "gemini-2.5-flash";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${byok.apiKey}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          { role: "user", parts: [{ text: `${systemPrompt}\n\nUser Directives: ${prompt}` }] }
-        ],
-      }),
-    });
-    if (!res.ok) throw new Error(`Gemini API error: HTTP ${res.status}`);
-    const data = await res.json();
-    rawResponse = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const result = await callGeminiWithCascade(prompt, systemPrompt, byok.apiKey, byok.model);
+    rawResponse = result.text;
   } else if (byok.provider === "openai") {
-    const model = byok.model || "gpt-4o-mini";
+    const model = byok.model || "gpt-4o";
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -461,6 +648,7 @@ Respond ONLY with a JSON object:
   const parsed = JSON.parse(jsonMatch[0]);
   let nextTimeline = { ...timeline };
   let nextClips = [...nextTimeline.clips];
+  const actionsTaken: Array<{ type: string; description: string }> = [];
 
   if (parsed.aspectRatio) {
     nextTimeline.aspectRatio = parsed.aspectRatio;
@@ -474,11 +662,12 @@ Respond ONLY with a JSON object:
       nextTimeline.width = 1080;
       nextTimeline.height = 1080;
     }
+    actionsTaken.push({ type: "set_aspect_ratio", description: `Canvas set to ${parsed.aspectRatio}` });
   }
 
   if (Array.isArray(parsed.actions)) {
     for (const act of parsed.actions) {
-      if (act.action === "add_text") {
+      if (act.action === "add_text_overlay" || act.action === "add_text") {
         nextClips.push({
           id: `ai-text-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           name: act.text || "AI Overlay",
@@ -487,18 +676,58 @@ Respond ONLY with a JSON object:
           duration: act.duration ?? 3.5,
           trackIndex: 0,
           text: act.text,
-          transform: { x: 0, y: 0, width: 85, height: 20, scale: 1, rotation: 0, opacity: 1 },
+          transform: { x: 0, y: 30, width: 85, height: 18, scale: 1, rotation: 0, opacity: 1 },
           style: {
-            fontSize: act.style?.fontSize || 36,
+            fontSize: act.style?.fontSize || 32,
             color: act.style?.color || "#FFFFFF",
             fontFamily: act.style?.fontFamily || "Inter, sans-serif",
             fontWeight: 700,
             textAlign: "center",
+            shadow: act.style?.shadow || "0 2px 12px rgba(0,0,0,0.7)",
           },
           animation: { in: act.animation || "pop", out: "fade", duration: 0.4 },
         });
-      } else if (act.action === "set_filter") {
+        actionsTaken.push({ type: "add_text_overlay", description: `Added text overlay "${act.text}"` });
+      } else if (act.action === "split_clip" || act.action === "split_clips") {
+        const interval = act.interval || 2.5;
+        const videoClips = nextClips.filter((c) => c.type === "video");
+        const otherClips = nextClips.filter((c) => c.type !== "video");
+        const splitClips: TimelineClip[] = [];
+
+        for (const vc of videoClips) {
+          if (vc.duration > interval + 0.5) {
+            let offset = 0;
+            let count = 0;
+            while (offset < vc.duration) {
+              const dur = Math.min(interval, Math.round((vc.duration - offset) * 10) / 10);
+              if (dur < 0.5 && splitClips.length > 0) {
+                splitClips[splitClips.length - 1].duration += dur;
+                break;
+              }
+              splitClips.push({
+                ...vc,
+                id: `${vc.id}-seg-${count}-${Date.now()}`,
+                name: `${vc.name} (Beat ${count + 1})`,
+                start: vc.start + offset,
+                duration: dur,
+                trimStart: (vc.trimStart || 0) + offset,
+              });
+              offset += dur;
+              count++;
+            }
+          } else {
+            splitClips.push(vc);
+          }
+        }
+        nextClips = [...splitClips, ...otherClips];
+        actionsTaken.push({ type: "split_clip", description: `Split video into ${splitClips.length} beats (${interval}s)` });
+      } else if (act.action === "apply_video_filter" || act.action === "set_filter") {
         nextClips = nextClips.map((c) => (c.type === "video" ? { ...c, filter: act.filter } : c));
+        actionsTaken.push({ type: "apply_video_filter", description: `Applied '${act.filter}' filter` });
+      } else if (act.action === "set_playback_speed") {
+        const speed = act.speed || 1.0;
+        nextClips = nextClips.map((c) => (c.type === "video" ? { ...c, audio: { ...(c.audio || { volume: 100, muted: false, fadeIn: 0, fadeOut: 0, speed: 1.0 }), speed } } : c));
+        actionsTaken.push({ type: "set_playback_speed", description: `Set video playback speed to ${speed}x` });
       }
     }
   }
@@ -507,5 +736,6 @@ Respond ONLY with a JSON object:
   return {
     timeline: nextTimeline,
     message: parsed.summary || "AI Director updated the composition successfully.",
+    actionsTaken,
   };
 }
