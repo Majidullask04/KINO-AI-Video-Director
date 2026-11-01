@@ -87,12 +87,12 @@ import {
   saveTimeline,
   checkBackendAvailability,
   listAssets,
-  saveAsset,
   deleteAsset,
   getFile,
   saveFile,
   createSampleMediaAssets,
 } from "@/lib/storage-adapter";
+import { ingestLocalMediaFile, createStarterComposition } from "@/lib/media-engine";
 import {
   renderTimelineInBrowser,
   triggerFileDownload,
@@ -107,6 +107,7 @@ import {
   GEMINI_MODEL_CASCADE,
   ByokSettings,
 } from "@/lib/ai-director";
+import { useStudioStore } from "@/store/useStudioStore";
 
 interface StudioViewProps {
   activeProject: Project | null;
@@ -165,20 +166,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
   onOpenTerminal,
   onUpdateProjectTitle,
 }) => {
-  // ── Unified Reactive Timeline & Clip State ──
-  const [timelineState, setTimelineState] = useState<TimelineProjectState | null>(null);
-  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  // ── Unified Reactive Timeline & Clip State (Zustand Studio Store) ──
+  const timelineState = useStudioStore((s) => s.timeline);
+  const selectedClipId = useStudioStore((s) => s.playback.selectedClipId);
 
-  // Undo / Redo Stacks
-  const [undoStack, setUndoStack] = useState<TimelineProjectState[]>([]);
-  const [redoStack, setRedoStack] = useState<TimelineProjectState[]>([]);
+  // Undo / Redo Stacks (Unified History)
+  const undoStack = useStudioStore((s) => s.history.past);
+  const redoStack = useStudioStore((s) => s.history.future);
 
-  // Playback & Stage State
-  const [currentTime, setCurrentTime] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [isLooping, setIsLooping] = useState<boolean>(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  // Playback & Stage State (Zustand Store)
+  const currentTime = useStudioStore((s) => s.playback.currentTime);
+  const isPlaying = useStudioStore((s) => s.playback.isPlaying);
+  const isLooping = useStudioStore((s) => s.playback.loop);
+  const playbackSpeed = useStudioStore((s) => s.playback.playbackRate);
+  const isMuted = useStudioStore((s) => s.playback.muted);
   const [stageZoom, setStageZoom] = useState<"fit" | "50%" | "100%" | "125%">("fit");
 
   // View & Island Layout State
@@ -258,6 +259,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const animationFrameRef = useRef<number | null>(null);
   const fileUploadInputRef = useRef<HTMLInputElement | null>(null);
   const stageViewportRef = useRef<HTMLDivElement | null>(null);
+  const stageFullscreenRef = useRef<HTMLDivElement | null>(null);
+
+  // Unified Store Actions (Zustand)
+  const storeSetTimeline = useStudioStore((s) => s.setTimeline);
+  const storeSelectClip = useStudioStore((s) => s.selectClip);
+  const storeUndo = useStudioStore((s) => s.history.undo);
+  const storeRedo = useStudioStore((s) => s.history.redo);
+  const storeSetCurrentTime = useStudioStore((s) => s.setCurrentTime);
+  const storeSetPlaying = useStudioStore((s) => s.setPlaying);
+  const storeSetLoop = useStudioStore((s) => s.setLoop);
+  const storeSetPlaybackRate = useStudioStore((s) => s.setPlaybackRate);
+  const storeSetMuted = useStudioStore((s) => s.setMuted);
+  const storeSetAssets = useStudioStore((s) => s.setAssets);
+  const storeAssets = useStudioStore((s) => s.assets);
 
   const totalDuration = timelineState?.duration || activeProject?.target_duration || 12.0;
 
@@ -283,9 +298,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const loadProjectTimeline = async (projectId: string) => {
     try {
       const state = await getTimeline(projectId);
-      setTimelineState(state);
+      if (state && (!state.clips || state.clips.length === 0)) {
+        // First-visit / fresh project: seed the playable starter composition.
+        storeSetTimeline(createStarterComposition());
+        return;
+      }
+      storeSetTimeline(state);
       if (state.clips && state.clips.length > 0 && !selectedClipId) {
-        setSelectedClipId(state.clips[0].id);
+        storeSelectClip(state.clips[0].id);
       }
     } catch (e) {
       console.warn("Could not load timeline state:", e);
@@ -312,43 +332,38 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   };
 
-  // ── 2. Reactive Timeline State Updates & Persistence ──
+  // ── 2. Reactive Timeline State Updates & Persistence (via Unified Store) ──
   const handleUpdateTimeline = useCallback(
-    async (nextTimeline: TimelineProjectState, recordUndo = true) => {
-      if (recordUndo && timelineState) {
-        setUndoStack((prev) => [...prev.slice(-30), timelineState]);
-        setRedoStack([]);
-      }
-      setTimelineState(nextTimeline);
-      if (activeProject) {
-        await saveTimeline(activeProject.id, nextTimeline);
-      }
+    (nextTimeline: TimelineProjectState, recordUndo = true) => {
+      storeSetTimeline(nextTimeline, { recordUndo });
     },
-    [activeProject, timelineState]
+    [storeSetTimeline]
   );
 
-  const handleUndo = () => {
-    if (undoStack.length === 0 || !timelineState) return;
-    const previous = undoStack[undoStack.length - 1];
-    setUndoStack((prev) => prev.slice(0, -1));
-    setRedoStack((prev) => [...prev, timelineState]);
-    handleUpdateTimeline(previous, false);
-  };
+  // Persist unified timeline state (IndexedDB + backend mirror fallback)
+  useEffect(() => {
+    if (timelineState && activeProject) {
+      saveTimeline(activeProject.id, timelineState).catch((e) => {
+        console.warn("Unified timeline persist failed:", e);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timelineState, activeProject?.id]);
 
-  const handleRedo = () => {
-    if (redoStack.length === 0 || !timelineState) return;
-    const next = redoStack[redoStack.length - 1];
-    setRedoStack((prev) => prev.slice(0, -1));
-    setUndoStack((prev) => [...prev, timelineState]);
-    handleUpdateTimeline(next, false);
-  };
+  const handleUndo = useCallback(() => {
+    storeUndo();
+  }, [storeUndo]);
+
+  const handleRedo = useCallback(() => {
+    storeRedo();
+  }, [storeRedo]);
 
   const handleUpdateSelectedClip = (updates: Partial<TimelineClip>) => {
-    if (!timelineState || !selectedClipId) return;
-    const nextClips = timelineState.clips.map((c) =>
-      c.id === selectedClipId ? { ...c, ...updates } : c
-    );
-    handleUpdateTimeline({ ...timelineState, clips: nextClips });
+    const { timeline, playback } = useStudioStore.getState();
+    const clipId = playback.selectedClipId || selectedClipId;
+    if (!timeline || !clipId) return;
+    const nextClips = (timeline.clips || []).map((c) => (c.id === clipId ? { ...c, ...updates } : c));
+    storeSetTimeline({ ...timeline, clips: nextClips });
   };
 
   const handleUpdateClipTransform = (updates: Partial<TimelineClip["transform"]>) => {
@@ -356,9 +371,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     handleUpdateSelectedClip({
       transform: { ...selectedClip.transform, ...updates },
     });
-  };
-
-  const handleUpdateClipStyle = (updates: Partial<NonNullable<TimelineClip["style"]>>) => {
+  };  const handleUpdateClipStyle = (updates: Partial<NonNullable<TimelineClip["style"]>>) => {
     if (!selectedClip) return;
     handleUpdateSelectedClip({
       style: { ...(selectedClip.style || {}), ...updates },
@@ -386,8 +399,26 @@ export const StudioView: React.FC<StudioViewProps> = ({
       const newAssets: LocalAssetRecord[] = [];
 
       for (const file of fileArray) {
-        const asset = await saveAsset(activeProject.id, file);
+        const { assetId, blobUrl, telemetry } = await ingestLocalMediaFile(file);
+        const asset: LocalAssetRecord = {
+          id: assetId,
+          filename: file.name,
+          url: blobUrl,
+          thumbnailUrl: telemetry.thumbnailUrl,
+          waveform: telemetry.waveform.length > 0 ? telemetry.waveform : undefined,
+          blob: file,
+          duration: telemetry.duration || 4.0,
+          width: telemetry.width,
+          height: telemetry.height,
+          fps: telemetry.fps || 30,
+          filesize_bytes: file.size,
+          has_audio: telemetry.hasAudio || (telemetry.waveform?.length || 0) > 0,
+          has_video: telemetry.hasVideo,
+          aspect_ratio: telemetry.width && telemetry.height ? (telemetry.width >= telemetry.height ? "16:9" : "9:16") : "16:9",
+          created_at: Date.now(),
+        };
         newAssets.push(asset);
+        storeSetAssets([asset, ...storeAssets]);
       }
 
       await loadAssetsList();
@@ -419,8 +450,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
         };
 
         await handleUpdateTimeline(updatedTimeline);
-        setSelectedClipId(videoClip.id);
-        setCurrentTime(0.0);
+        storeSelectClip(videoClip.id);
+        storeSetCurrentTime(0.0);
       }
     } catch (e: any) {
       console.error("Upload error:", e);
@@ -464,11 +495,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
       const delta = ((now - lastTime) / 1000) * playbackSpeed;
       lastTime = now;
 
-      setCurrentTime((prev) => {
+      storeSetCurrentTime((prev) => {
         const next = prev + delta;
         if (next >= totalDuration) {
           if (isLooping) return 0;
-          setIsPlaying(false);
+          storeSetPlaying(false);
           return totalDuration;
         }
         return next;
@@ -539,11 +570,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const handleSeek = (time: number) => {
     const clamped = Math.max(0, Math.min(totalDuration, time));
-    setCurrentTime(clamped);
+    storeSetCurrentTime(clamped);
   };
 
   const handleTogglePlay = () => {
-    setIsPlaying(!isPlaying);
+    storeSetPlaying(!isPlaying);
+  };
+
+  const handleToggleFullscreen = () => {
+    const el = stageFullscreenRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void el.requestFullscreen?.();
+    }
   };
 
   // Keyboard Spacebar Shortcut for Transport
@@ -571,7 +612,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isPlaying, undoStack, redoStack]);
+  }, [handleTogglePlay, handleUndo, handleRedo]);
 
   // ── 6. Stage Drag-to-Position for Layers ──
   useEffect(() => {
@@ -916,7 +957,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
     const nextClips = [...timelineState.clips, newClip];
     handleUpdateTimeline({ ...timelineState, clips: nextClips });
-    setSelectedClipId(clipId);
+    storeSelectClip(clipId);
   };
 
   const handleInsertAssetToTimeline = (asset: LocalAssetRecord) => {
@@ -954,7 +995,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const nextClips = [...timelineState.clips, newClip];
     const newDuration = Math.max(timelineState.duration, currentTime + (asset.duration || 4.0));
     handleUpdateTimeline({ ...timelineState, duration: newDuration, clips: nextClips });
-    setSelectedClipId(clipId);
+    storeSelectClip(clipId);
   };
 
   const handleDeleteAsset = async (assetIdOrFilename: string) => {
@@ -1427,7 +1468,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
             {/* ── Real-Time Multi-Layer Stage Viewport ── */}
             <div
-              ref={stageViewportRef}
+              ref={(el) => {
+                stageViewportRef.current = el;
+                stageFullscreenRef.current = el;
+              }}
               className="flex-1 bg-[#0A0A09] relative flex items-center justify-center overflow-hidden p-4 min-h-[260px]"
             >
               {centerTab === "main" ? (
@@ -1444,7 +1488,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         : timelineState?.background?.value || "#000000",
                   }}
                   className="relative rounded-2xl overflow-hidden border border-white/15 bg-black shadow-2xl flex items-center justify-center select-none"
-                  onClick={() => setSelectedClipId(null)}
+                  onClick={() => storeSelectClip(null)}
                 >
                   {/* Phone Notch indicator for 9:16 Vertical format */}
                   {isVertical && (
@@ -1470,6 +1514,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             ? "contrast(140%)"
                             : activeT1Clip.filter === "teal"
                             ? "hue-rotate(150deg)"
+                            : activeT1Clip.filter === "cinematic"
+                            ? "contrast(115%) saturate(110%) brightness(102%)"
+                            : activeT1Clip.filter === "warm"
+                            ? "sepia(28%) saturate(135%) contrast(105%) brightness(98%)"
                             : "none"
                         } brightness(${activeT1Clip.filterAdjustments?.brightness ?? 100}%) contrast(${
                           activeT1Clip.filterAdjustments?.contrast ?? 100
@@ -1480,7 +1528,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       className="w-full h-full flex items-center justify-center overflow-hidden z-10"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSelectedClipId(activeT1Clip.id);
+                        storeSelectClip(activeT1Clip.id);
                       }}
                     >
                       {activeT1Clip.type === "video" ? (
@@ -1508,7 +1556,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         key={clip.id}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedClipId(clip.id);
+                          storeSelectClip(clip.id);
                         }}
                         style={{
                           position: "absolute",
@@ -1548,7 +1596,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           key={clip.id}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedClipId(clip.id);
+                            storeSelectClip(clip.id);
                           }}
                           onMouseDown={(e) => {
                             if (isSelected) {
@@ -1769,7 +1817,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                               <div
                                 key={clip.id}
                                 onClick={() => {
-                                  setSelectedClipId(clip.id);
+                                  storeSelectClip(clip.id);
                                   handleSeek(clip.start);
                                 }}
                                 className={`flex items-center justify-between text-xs p-2 rounded-lg cursor-pointer transition-colors ${
@@ -1906,13 +1954,27 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   </span>
                 </div>
 
-                {/* Center: Play/Pause + Timecode */}
+                {/* Center: Frame Step + Play/Pause + Timecode */}
                 <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => storeSetCurrentTime((t) => Math.max(0, (t || 0) - 1 / 30))}
+                    className="w-7 h-7 rounded-lg bg-[#222220] hover:bg-[#2c2c28] text-zinc-300 hover:text-white flex items-center justify-center transition-colors border border-white/10"
+                    title="Frame Step Back (Left Arrow)"
+                  >
+                    <ChevronLeft size={13} />
+                  </button>
                   <button
                     onClick={handleTogglePlay}
                     className="w-8 h-8 rounded-full bg-white text-black hover:bg-zinc-200 flex items-center justify-center transition-colors shadow-md"
                   >
                     {isPlaying ? <Pause size={14} /> : <Play size={14} className="ml-0.5 fill-current" />}
+                  </button>
+                  <button
+                    onClick={() => storeSetCurrentTime((t) => Math.min(totalDuration, (t || 0) + 1 / 30))}
+                    className="w-7 h-7 rounded-lg bg-[#222220] hover:bg-[#2c2c28] text-zinc-300 hover:text-white flex items-center justify-center transition-colors border border-white/10"
+                    title="Frame Step Forward (Right Arrow)"
+                  >
+                    <ChevronRight size={13} />
                   </button>
                   <div className="font-mono text-xs text-[#F4F4F2] font-medium">
                     <span className="text-[#34D399]">{formatSMPTE(currentTime)}</span>
@@ -1921,10 +1983,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   </div>
                 </div>
 
-                {/* Right: Audio, Speed, Loop */}
+                {/* Right: Audio, Frame Step, Speed, Loop, Fullscreen */}
                 <div className="flex items-center gap-2 text-[#9E9E98]">
                   <button
-                    onClick={() => setIsMuted(!isMuted)}
+                    onClick={handleToggleFullscreen}
+                    className="hover:text-white transition-colors"
+                    title="Fullscreen Stage"
+                  >
+                    <Maximize2 size={14} />
+                  </button>
+                  <button
+                    onClick={() => storeSetMuted(!isMuted)}
                     className="hover:text-white transition-colors"
                     title={isMuted ? "Unmute" : "Mute"}
                   >
@@ -1934,14 +2003,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     onClick={() => {
                       const speeds = [0.5, 1, 1.5, 2];
                       const next = speeds[(speeds.indexOf(playbackSpeed) + 1) % speeds.length];
-                      setPlaybackSpeed(next);
+                      storeSetPlaybackRate(next);
                     }}
                     className="text-[11px] font-mono hover:text-white px-1.5 py-0.5 rounded bg-white/5"
                   >
                     {playbackSpeed}x
                   </button>
                   <button
-                    onClick={() => setIsLooping(!isLooping)}
+                    onClick={() => storeSetLoop(!isLooping)}
                     className={`hover:text-white transition-colors ${isLooping ? "text-[#34D399]" : ""}`}
                     title="Loop playback"
                   >
@@ -1967,7 +2036,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       </span>
                     </div>
                     <button
-                      onClick={() => setSelectedClipId(null)}
+                      onClick={() => storeSelectClip(null)}
                       className="w-6 h-6 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-white flex items-center justify-center transition-colors"
                       title="Deselect clip"
                     >
@@ -2162,6 +2231,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             { id: "contrast", label: "Contrast" },
                             { id: "glow", label: "Glow" },
                             { id: "teal", label: "Cool Teal" },
+                            { id: "cinematic", label: "Cinematic" },
+                            { id: "warm", label: "Warm Film" },
                           ].map((f) => (
                             <button
                               key={f.id}
@@ -2312,7 +2383,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           start: Math.min(totalDuration - selectedClip.duration, selectedClip.start + selectedClip.duration),
                         };
                         handleUpdateTimeline({ ...timelineState!, clips: [...timelineState!.clips, copy] });
-                        setSelectedClipId(copy.id);
+                        storeSelectClip(copy.id);
                       }}
                       className="pill-dark text-xs py-1 px-2.5 flex items-center gap-1 text-zinc-300 hover:text-white"
                       title="Duplicate (Cmd+D)"
@@ -2325,7 +2396,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       onClick={() => {
                         const nextClips = timelineState!.clips.filter((c) => c.id !== selectedClip.id);
                         handleUpdateTimeline({ ...timelineState!, clips: nextClips });
-                        setSelectedClipId(null);
+                        storeSelectClip(null);
                       }}
                       className="pill-dark text-xs py-1 px-2.5 flex items-center gap-1 text-rose-400 hover:text-rose-300 hover:border-rose-500/40"
                       title="Delete (Delete / Backspace)"
@@ -2669,7 +2740,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 timeline={timelineState || undefined}
                 onUpdateTimeline={handleUpdateTimeline}
                 selectedClipId={selectedClipId}
-                onSelectClip={(id) => setSelectedClipId(id)}
+                onSelectClip={(id) => storeSelectClip(id)}
                 decisions={decisions}
                 selectedDecisionId={selectedDecision?.decision_id || null}
                 onSelectDecision={onSelectDecision}
@@ -3028,8 +3099,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
         activeProject={activeProject}
         currentTimeline={timelineState}
         onRestoreTimeline={(tl) => {
-          setTimelineState(tl);
-          setSelectedClipId(tl.clips?.[0]?.id || null);
+          storeSetTimeline(tl);
+          storeSelectClip(tl.clips?.[0]?.id || null);
         }}
         onRestored={() => {
           if (activeProject) loadProjectTimeline(activeProject.id);

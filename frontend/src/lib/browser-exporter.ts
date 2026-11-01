@@ -61,9 +61,18 @@ export async function renderTimelineInBrowser(
     mimeType = "video/webm;codecs=vp8,opus";
   }
 
-  // Capture canvas stream
-  const stream = canvas.captureStream(fps);
-  const recorder = new MediaRecorder(stream, {
+  // Capture canvas stream and mix in active audio tracks via Web Audio
+  const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+  const audioCtx = AudioCtx ? new AudioCtx() : null;
+  if (audioCtx && audioCtx.state === "suspended") void audioCtx.resume();
+  const audioDest = audioCtx ? audioCtx.createMediaStreamDestination() : null;
+
+  const canvasStream = canvas.captureStream(fps);
+  const mixedStream = new MediaStream();
+  canvasStream.getVideoTracks().forEach((t) => mixedStream.addTrack(t));
+  if (audioDest) audioDest.stream.getAudioTracks().forEach((t) => mixedStream.addTrack(t));
+
+  const recorder = new MediaRecorder(mixedStream, {
     mimeType,
     videoBitsPerSecond: is1080p ? 8_000_000 : 4_000_000,
   });
@@ -79,6 +88,21 @@ export async function renderTimelineInBrowser(
 
   // Render loop across timeline frames
   const frameIntervalMs = 1000 / fps;
+  const audioClips = (timeline.clips || []).filter((c) => c.type === "audio" && c.sourceUrl);
+  const audioSources = new Map<string, { el: HTMLAudioElement; src: MediaElementAudioSourceNode }>();
+  for (const clip of audioClips) {
+    const el = new Audio();
+    el.src = clip.sourceUrl as string;
+    const source = audioCtx!.createMediaElementSource(el);
+    source.connect(audioDest!);
+    el.playbackRate = clip.audio?.speed || 1;
+    el.volume = (clip.audio?.volume ?? 100) / 100;
+    if (clip.audio?.muted) el.muted = true;
+    el.currentTime = clip.start;
+    void el.play();
+    audioSources.set(clip.id, { el, src: source });
+  }
+
   for (let frame = 0; frame < totalFrames; frame++) {
     const currentTime = frame / fps;
 
@@ -103,6 +127,20 @@ export async function renderTimelineInBrowser(
     for (const clip of activeClips) {
       if (clip.type === "text") {
         drawTextClip(ctx, clip, currentTime, targetWidth, targetHeight);
+      }
+    }
+
+    // Drive active audio elements in sync with the playhead
+    for (const clip of audioClips) {
+      const entry = audioSources.get(clip.id);
+      if (!entry) continue;
+      const el = entry.el;
+      if (currentTime >= clip.start && currentTime <= clip.start + clip.duration) {
+        const local = currentTime - clip.start;
+        if (Math.abs(el.currentTime - local) > 0.2) el.currentTime = local;
+        if (el.paused) void el.play();
+      } else {
+        if (!el.paused) el.pause();
       }
     }
 
@@ -138,8 +176,14 @@ export async function renderTimelineInBrowser(
         });
       }
 
-      // Cleanup preloaded media
+      // Cleanup preloaded media & audio elements
       cleanupMediaElements(mediaElements);
+      for (const entry of audioSources.values()) {
+        entry.el.pause();
+        entry.src.disconnect();
+      }
+      audioSources.clear();
+      if (audioCtx) void audioCtx.close();
 
       resolve({ blob: finalBlob, url, filename });
     };
@@ -273,6 +317,8 @@ function drawMediaClip(
   if (clip.filter === "blur") ctx.filter = "blur(4px)";
   else if (clip.filter === "bw") ctx.filter = "grayscale(100%)";
   else if (clip.filter === "vintage") ctx.filter = "sepia(50%) contrast(110%)";
+  else if (clip.filter === "cinematic") ctx.filter = "contrast(115%) saturate(110%) brightness(102%)";
+  else if (clip.filter === "warm") ctx.filter = "sepia(28%) saturate(135%) contrast(105%) brightness(98%)";
 
   const centerX = (canvasW / 2) + ((transform.x / 100) * canvasW);
   const centerY = (canvasH / 2) + ((transform.y / 100) * canvasH);

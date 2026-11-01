@@ -255,6 +255,30 @@ export async function testApiKey(
       return { ok: false, message: `OpenRouter returned HTTP ${res.status}` };
     }
 
+    if (settings.provider === "anthropic") {
+      const model = settings.model || "claude-3-5-sonnet-latest";
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 256,
+          messages: [{ role: "user", content: "Reply with: OK" }],
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.content?.map((c: any) => c?.text || "").join("") || "OK";
+        return { ok: true, message: `✓ Connected (Anthropic using model: ${model})`, workingModel: model };
+      }
+      const data = await res.json().catch(() => ({}));
+      return { ok: false, message: data.error?.message || `Anthropic check returned HTTP ${res.status}` };
+    }
+
     return { ok: true, message: "Key saved successfully." };
   } catch (err: any) {
     return { ok: false, message: `Connection test failed: ${err.message}` };
@@ -516,6 +540,48 @@ export function executeBuiltinRule(
     };
   }
 
+  // Rule 6b: Cut silent gaps using audio waveform peaks (100% Free)
+  if (p.includes("silent") || p.includes("silence") || p.includes("gap") || p.includes("quiet") || p.includes("pause")) {
+    const trimmedClips = nextClips.map((c) => {
+      if (c.type !== "video" || !c.waveform || c.waveform.length === 0) return c;
+      const threshold = 0.12;
+      const startIdx = c.waveform.findIndex((v) => v > threshold);
+      const trimmedStart = startIdx > 0 ? startIdx : 0;
+      const reversed = [...c.waveform].reverse();
+      const endIdx = reversed.findIndex((v) => v > threshold);
+      const trimmedEnd = endIdx >= 0 ? c.waveform.length - endIdx - 1 : c.waveform.length;
+      const sourceSilence = trimmedStart - (c.trimStart || 0);
+      const clipSilence = Math.max(0, trimmedEnd - trimmedStart - (c.duration - sourceSilence));
+      if (sourceSilence <= 0.05 && clipSilence <= 0.05) return c;
+      const duration = Math.max(0.2, c.duration - sourceSilence - clipSilence);
+      return { ...c, duration, trimStart: (c.trimStart || 0) + sourceSilence };
+    });
+    nextClips = trimmedClips;
+    actionsTaken.push({ type: "trim_clip", description: "Cut silent gaps using audio waveform peaks" });
+    return {
+      timeline: { ...timeline, clips: nextClips },
+      message: `Built-in Rule: Cut silent gaps using audio waveform analysis.`,
+      actionsTaken,
+    };
+  }
+
+  // Rule 6c: Snap clip edges to audio waveform beat transients (100% Free)
+  if (p.includes("snap") || p.includes("beat")) {
+    const snappedClips = nextClips.map((c) => {
+      if (!c.waveform || c.waveform.length === 0 || c.type === "audio") return c;
+      const peakIdx = c.waveform.findIndex((v, i) => v > 0.5 && (i === 0 || c.waveform![i - 1] <= 0.5));
+      const snappedTime = peakIdx >= 0 ? peakIdx * (c.duration / c.waveform.length) : c.start;
+      return { ...c, start: Math.round(snappedTime * 10) / 10 };
+    });
+    nextClips = snappedClips;
+    actionsTaken.push({ type: "snap_to_beat", description: "Snapped clip boundaries to audio beat transients" });
+    return {
+      timeline: { ...timeline, clips: nextClips },
+      message: `Built-in Rule: Snapped timeline edges to audio beat transients.`,
+      actionsTaken,
+    };
+  }
+
   // Rule 7: Generic Title / Headline addition
   const titleText = prompt.replace(/^(add|create|insert)\s+(title|heading|text|headline)[:\s]*/i, "").trim() || "KINO VIDEO DIRECT";
   const newTitleClip: TimelineClip = {
@@ -578,8 +644,36 @@ Respond ONLY with a JSON object conforming to this schema:
       "animation": "pop" | "word-reveal" | "slide-up" | "fade"
     },
     {
-      "action": "split_clip",
+      "action": "addTextClip",
+      "text": "Caption text",
+      "start": 0.0,
+      "duration": 3.0,
+      "style": { "fontSize": 32, "color": "#FFFFFF", "fontFamily": "Inter, sans-serif" }
+    },
+    {
+      "action": "splitClip",
+      "clipId": "clip-id-or-index",
       "interval": 2.5
+    },
+    {
+      "action": "split_clips",
+      "interval": 2.5
+    },
+    {
+      "action": "trimClip",
+      "clipId": "clip-id-or-index",
+      "start": 0.0,
+      "duration": 3.0
+    },
+    {
+      "action": "deleteClip",
+      "clipId": "clip-id-or-index"
+    },
+    {
+      "action": "updateClipStyle",
+      "clipId": "clip-id-or-index",
+      "style": { "fontSize": 40, "color": "#FBBF24", "fontFamily": "Inter, sans-serif" },
+      "animation": "pop"
     },
     {
       "action": "apply_video_filter",
@@ -588,9 +682,29 @@ Respond ONLY with a JSON object conforming to this schema:
     {
       "action": "set_playback_speed",
       "speed": 1.0
+    },
+    {
+      "action": "set_aspect_ratio",
+      "aspectRatio": "16:9" | "9:16" | "1:1"
+    },
+    {
+      "action": "autoCutEveryNSeconds",
+      "interval": 2.5
+    },
+    {
+      "action": "generateBeatCaptions",
+      "text": "Caption script lines...",
+      "start": 0.0
     }
   ]
 }`;
+
+  const resolveClipIndex = (clipId: string): number => {
+    const idx = timeline.clips.findIndex((c) => c.id === clipId);
+    if (idx >= 0) return idx;
+    const byName = timeline.clips.findIndex((c) => (c.name || "").toLowerCase().includes((clipId || "").toLowerCase()));
+    return byName >= 0 ? byName : -1;
+  };
 
   let rawResponse = "";
 
@@ -617,6 +731,27 @@ Respond ONLY with a JSON object conforming to this schema:
     if (!res.ok) throw new Error(`OpenAI API error: HTTP ${res.status}`);
     const data = await res.json();
     rawResponse = data?.choices?.[0]?.message?.content || "";
+  } else if (byok.provider === "anthropic") {
+    const model = byok.model || "claude-3-5-sonnet-latest";
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": byok.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 2048,
+        temperature: 0.3,
+        system: systemPrompt,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!res.ok) throw new Error(`Anthropic API error: HTTP ${res.status}`);
+    const data = await res.json();
+    const textBlock = data?.content?.find((c: any) => c?.type === "text") || {};
+    rawResponse = textBlock.text || "";
   } else {
     // OpenRouter fallback
     const model = byok.model || "google/gemini-2.5-flash";
@@ -728,6 +863,82 @@ Respond ONLY with a JSON object conforming to this schema:
         const speed = act.speed || 1.0;
         nextClips = nextClips.map((c) => (c.type === "video" ? { ...c, audio: { ...(c.audio || { volume: 100, muted: false, fadeIn: 0, fadeOut: 0, speed: 1.0 }), speed } } : c));
         actionsTaken.push({ type: "set_playback_speed", description: `Set video playback speed to ${speed}x` });
+      } else if (act.action === "trimClip" || act.action === "trim") {
+        const idx = resolveClipIndex(act.clipId || "");
+        if (idx >= 0 && nextClips[idx]) {
+          nextClips[idx] = { ...nextClips[idx], start: act.start ?? nextClips[idx].start, duration: act.duration ?? nextClips[idx].duration };
+          actionsTaken.push({ type: "trim_clip", description: `Trimmed clip "${nextClips[idx].name}" to ${act.duration ?? nextClips[idx].duration}s` });
+        }
+      } else if (act.action === "deleteClip" || act.action === "delete") {
+        const idx = resolveClipIndex(act.clipId || "");
+        if (idx >= 0) {
+          nextClips.splice(idx, 1);
+          actionsTaken.push({ type: "delete_clip", description: `Deleted clip "${nextClips[idx]?.name || act.clipId}"` });
+        }
+      } else if (act.action === "addTextClip" || act.action === "add_text_clip") {
+        nextClips.push({
+          id: `ai-text-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          name: act.text || "AI Overlay",
+          type: "text",
+          start: act.start ?? 0,
+          duration: act.duration ?? 3.5,
+          trackIndex: 0,
+          text: act.text,
+          transform: { x: 0, y: 30, width: 85, height: 18, scale: 1, rotation: 0, opacity: 1 },
+          style: { fontSize: act.style?.fontSize || 32, color: act.style?.color || "#FFFFFF", fontFamily: act.style?.fontFamily || "Inter, sans-serif", fontWeight: 700, textAlign: "center", shadow: act.style?.shadow || "0 2px 12px rgba(0,0,0,0.7)" },
+          animation: { in: act.animation || "pop", out: "fade", duration: 0.4 },
+        });
+        actionsTaken.push({ type: "add_text_overlay", description: `Added text overlay "${act.text}"` });
+      } else if (act.action === "updateClipStyle" || act.action === "update_style") {
+        const idx = resolveClipIndex(act.clipId || "");
+        if (idx >= 0 && nextClips[idx]) {
+          nextClips[idx] = { ...nextClips[idx], style: { ...(nextClips[idx].style || {}), ...(act.style || {}) } };
+          actionsTaken.push({ type: "update_text_style", description: `Updated style of clip "${nextClips[idx].name}"` });
+        }
+      } else if (act.action === "autoCutEveryNSeconds" || act.action === "auto_cut") {
+        const interval = act.interval || 2.5;
+        const videoClips = nextClips.filter((c) => c.type === "video");
+        const otherClips = nextClips.filter((c) => c.type !== "video");
+        const splitClips: any[] = [];
+        for (const vc of videoClips) {
+          if (vc.duration > interval + 0.5) {
+            let offset = 0;
+            let count = 0;
+            while (offset < vc.duration) {
+              const dur = Math.min(interval, Math.round((vc.duration - offset) * 10) / 10);
+              if (dur < 0.5 && splitClips.length > 0) {
+                splitClips[splitClips.length - 1].duration += dur;
+                break;
+              }
+              splitClips.push({ ...vc, id: `${vc.id}-seg-${count}-${Date.now()}`, name: `${vc.name} (Beat ${count + 1})`, start: vc.start + offset, duration: dur, trimStart: (vc.trimStart || 0) + offset });
+              offset += dur;
+              count++;
+            }
+          } else {
+            splitClips.push(vc);
+          }
+        }
+        nextClips = [...splitClips, ...otherClips];
+        actionsTaken.push({ type: "auto_cut", description: `Auto-cut every ${interval}s into pacing beats` });
+      } else if (act.action === "generateBeatCaptions" || act.action === "generate_captions") {
+        const captionClips: any[] = (act.text || "")
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter(Boolean)
+          .map((line: string, i: number) => ({
+            id: `ai-cap-${Date.now()}-${i}`,
+            name: `AI Caption ${i + 1}`,
+            type: "text",
+            start: act.start ?? 0,
+            duration: 3,
+            trackIndex: 0,
+            text: line,
+            transform: { x: 0, y: 30, width: 85, height: 16, scale: 1, rotation: 0, opacity: 1 },
+            style: { fontSize: 30, color: "#FBBF24", fontFamily: "'Playfair Display', serif", fontWeight: 700, textAlign: "center", shadow: "0 0 20px rgba(251,191,36,0.5)" },
+            animation: { in: "word-reveal", out: "fade", duration: 0.5 },
+          }));
+        nextClips = [...nextClips, ...captionClips];
+        actionsTaken.push({ type: "generate_captions", description: `Generated ${captionClips.length} beat captions from script text` });
       }
     }
   }

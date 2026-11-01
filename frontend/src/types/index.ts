@@ -194,7 +194,7 @@ export interface TimelineClip {
   audio?: ClipAudio;
   animation?: ClipAnimation;
   keyframes?: ClipKeyframe[];
-  filter?: "none" | "blur" | "glow" | "bw" | "vintage" | "contrast" | "vignette" | "teal";
+  filter?: "none" | "blur" | "glow" | "bw" | "vintage" | "contrast" | "vignette" | "teal" | "cinematic" | "warm";
   filterAdjustments?: {
     brightness?: number; // 50 to 150 (default 100)
     contrast?: number; // 50 to 150 (default 100)

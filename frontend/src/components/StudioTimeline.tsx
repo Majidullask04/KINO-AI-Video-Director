@@ -110,9 +110,9 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
   );
 
   const defaultTracks: TimelineTrack[] = [
-    { id: "track-0", index: 0, kind: "text", name: "T0 Graphics & Text", locked: false, muted: false, hidden: false },
-    { id: "track-1", index: 1, kind: "video", name: "T1 Primary Video", locked: false, muted: false, hidden: false },
-    { id: "track-2", index: 2, kind: "video", name: "T2 B-Roll & Layers", locked: false, muted: false, hidden: false },
+    { id: "track-0", index: 0, kind: "text", name: "T0 Overlays & Text", locked: false, muted: false, hidden: false },
+    { id: "track-1", index: 1, kind: "video", name: "T1 Main Video", locked: false, muted: false, hidden: false },
+    { id: "track-2", index: 2, kind: "overlay", name: "T2 B-Roll & PIP", locked: false, muted: false, hidden: false },
     { id: "track-3", index: 3, kind: "audio", name: "T3 Master Audio", locked: false, muted: false, hidden: false },
   ];
 
@@ -127,7 +127,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
 
   const progressPercent = Math.min(100, Math.max(0, (currentTime / duration) * 100));
 
-  // ── Keyboard Shortcuts ──
+  // ── Keyboard Shortcuts (single authoritative handler) ──
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept if user is typing in an input
@@ -150,7 +150,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
       } else if (e.key === "Backspace" || e.key === "Delete") {
         e.preventDefault();
         handleDeleteSelectedClip();
-      } else if (e.key === "d" && (e.metaKey || e.ctrlKey)) {
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
         e.preventDefault();
         handleDuplicateSelectedClip();
       } else if (e.key === "m" || e.key === "M") {
@@ -171,7 +171,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentTime, duration, effectiveSelectedId, activeClips, timeline]);
+  }, [currentTime, duration, effectiveSelectedId, activeClips, timeline, onTogglePlay, onSeek]);
 
   // ── Mouse Dragging for Clip Move & Trimming ──
   useEffect(() => {
@@ -218,6 +218,14 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
         }
 
         clip.start = Math.max(0, Math.round(newStart * 100) / 100);
+
+        // Drag Between Tracks: resolve which track lane the pointer is over.
+        const targetEl = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+        const trackEl = targetEl?.closest?.("[data-track-index]") as HTMLElement | null;
+        const hoveredTrackIndex = trackEl ? Number(trackEl.dataset.trackIndex) : dragState.trackIndex;
+        if (!Number.isNaN(hoveredTrackIndex)) {
+          clip.trackIndex = hoveredTrackIndex;
+        }
       } else if (dragState.mode === "trim-left") {
         let newStart = Math.max(0, dragState.initialStart + deltaSeconds);
         const originalEnd = dragState.initialStart + dragState.initialDuration;
@@ -344,7 +352,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
     }
   };
 
-  // Delete selected clip
+  // Delete selected clip (with ripple delete: shifts later clips on the track earlier)
   const handleDeleteSelectedClip = () => {
     if (!effectiveSelectedId) return;
     const clip = activeClips.find((c) => c.id === effectiveSelectedId);
@@ -354,7 +362,31 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
     const isLocked = tracks.find((t) => t.index === clip.trackIndex)?.locked;
     if (isLocked) return;
 
-    const updated = activeClips.filter((c) => c.id !== effectiveSelectedId);
+    const gapStart = clip.start;
+    const gapEnd = clip.start + clip.duration;
+
+    const updated = activeClips
+      .filter((c) => c.id !== effectiveSelectedId)
+      .map((c) => {
+        const isOnSameTrack = (c.trackIndex ?? 1) === (clip.trackIndex ?? 1);
+        const fallsInGap = c.start >= gapStart && c.start < gapEnd;
+        if (isOnSameTrack && fallsInGap) {
+          // Clip was fully swallowed by the deleted window — drop it.
+          return null;
+        }
+        if (isOnSameTrack && c.start >= gapEnd) {
+          // Ripple: shift the later clip earlier to close the gap.
+          const shift = clip.duration;
+          return {
+            ...c,
+            start: Math.round((c.start - shift) * 100) / 100,
+            trimStart: Math.max(0, Math.round(((c.trimStart || 0) - shift) * 100) / 100),
+          };
+        }
+        return c;
+      })
+      .filter((c): c is TimelineClip => c !== null);
+
     if (onUpdateTimeline && timeline) {
       onUpdateTimeline({ ...timeline, clips: updated });
     }
@@ -384,43 +416,6 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
       onSelectClip(duplicated.id);
     }
   };
-
-  // Global Keyboard Shortcuts (Space, S/Cmd+B, Backspace/Delete, Cmd+D, Arrow keys)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
-        return;
-      }
-
-      if (e.code === "Space") {
-        e.preventDefault();
-        onTogglePlay();
-      } else if (e.key === "s" || e.key === "S" || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b")) {
-        e.preventDefault();
-        handleSplitAtPlayhead();
-      } else if (e.key === "Backspace" || e.key === "Delete") {
-        e.preventDefault();
-        handleDeleteSelectedClip();
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
-        e.preventDefault();
-        handleDuplicateSelectedClip();
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        onSeek(Math.max(0, currentTime - 1 / 30));
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        onSeek(Math.min(duration, currentTime + 1 / 30));
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onTogglePlay, currentTime, duration, effectiveSelectedId, activeClips, onSeek]);
 
   // Add new track
   const handleAddTrack = (kind: "video" | "audio" | "text") => {
@@ -726,6 +721,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
               return (
                 <div
                   key={track.id || track.index}
+                  data-track-index={track.index}
                   className="h-14 border-b border-[#222220] p-1.5 relative flex items-center bg-[#111110]/40"
                   onClick={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
