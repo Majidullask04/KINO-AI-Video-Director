@@ -38,58 +38,7 @@ export const FootageView: React.FC<FootageViewProps> = ({
 }) => {
   const [clipFilter, setClipFilter] = useState<string>("all");
 
-  const filteredClips = (sourceClips.length > 0 ? sourceClips : [
-    {
-      clip_id: "clip_01",
-      filename: "raw_hook_talking_head.mp4",
-      shot_type: "TALKING_HEAD",
-      clip_duration: 3.2,
-      visual_summary: "Close-up talking head delivery with direct gaze and high engagement.",
-      tags: ["EXPLAINER", "HOOK", "TALKING_HEAD"],
-      energy_level: 5,
-      edge_density: 0.05,
-    },
-    {
-      clip_id: "clip_02",
-      filename: "raw_closeup_code.mp4",
-      shot_type: "CODE_SCREEN",
-      clip_duration: 2.8,
-      visual_summary: "High-contrast code editor and graph query traversal terminal.",
-      tags: ["CODE", "DEVELOPER", "CLOSEUP"],
-      energy_level: 3,
-      edge_density: 0.14,
-    },
-    {
-      clip_id: "clip_03",
-      filename: "raw_broll_lifestyle.mp4",
-      shot_type: "BROLL",
-      clip_duration: 4.1,
-      visual_summary: "Studio director workspace showing timeline tracks and dual monitors.",
-      tags: ["STUDIO", "HARDWARE", "BROLL"],
-      energy_level: 4,
-      edge_density: 0.06,
-    },
-    {
-      clip_id: "clip_04",
-      filename: "raw_energetic_broll.mp4",
-      shot_type: "BROLL",
-      clip_duration: 3.0,
-      visual_summary: "High-velocity kinetic motion graphics and outdoor B-roll cut.",
-      tags: ["FAST", "BROLL", "CINEMATIC"],
-      energy_level: 5,
-      edge_density: 0.05,
-    },
-    {
-      clip_id: "clip_05",
-      filename: "raw_product_demo.mp4",
-      shot_type: "PRODUCT_SHOT",
-      clip_duration: 2.5,
-      visual_summary: "Product UI walkthrough displaying automated timeline synthesis.",
-      tags: ["DEMO", "SOFTWARE", "NLE"],
-      energy_level: 4,
-      edge_density: 0.09,
-    },
-  ] as unknown as VideoClip[]).filter((clip) => {
+  const filteredClips = (sourceClips || []).filter((clip) => {
     const st = (clip.shot_type || "").toLowerCase();
     if (clipFilter === "dialog") return st.includes("talking") || st.includes("head");
     if (clipFilter === "broll") return st.includes("broll") || st.includes("action") || st.includes("lifestyle");
@@ -166,14 +115,14 @@ export const FootageView: React.FC<FootageViewProps> = ({
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <span style={{ fontSize: "13px", fontWeight: 600, color: "#F4F4F6", letterSpacing: "-0.01em" }}>
-                  INGEST RAW FOOTAGE & COMPUTER VISION ANALYSIS
+                  UPLOAD VIDEO FOOTAGE & SCENE TAGGING
                 </span>
                 <span className="tech-tag" style={{ color: "#06B6D4", borderColor: "rgba(6, 182, 212, 0.3)" }}>
-                  OpenCV + Gemini 2.5 Flash
+                  AI Vision Tagging
                 </span>
               </div>
               <p style={{ fontSize: "11.5px", color: "#71717A", margin: "3px 0 0", lineHeight: 1.4 }}>
-                Drag & drop video clips (.mp4, .mov, .webm) or browse files. Real frames are sampled for motion magnitude, energy level (1–5), edge density, and shot type, then matched to StoryBeats.
+                Drag & drop video clips (.mp4, .mov, .webm) or browse files. AI automatically analyzes motion, detects shot types, assesses visual energy, and matches clips to story beats.
               </p>
             </div>
           </div>
@@ -187,17 +136,7 @@ export const FootageView: React.FC<FootageViewProps> = ({
               style={{ display: "flex", alignItems: "center", gap: "6px" }}
             >
               <Upload size={13} />
-              Select Video Files
-            </button>
-            <button
-              type="button"
-              onClick={onLoadDemoFootage}
-              disabled={isUploadingFootage}
-              className="btn-secondary"
-              style={{ display: "flex", alignItems: "center", gap: "6px" }}
-            >
-              <RefreshCw size={13} className={isUploadingFootage ? "spin" : ""} />
-              Quick Ingest Demo Pack
+              Upload Video Clips
             </button>
           </div>
         </div>
@@ -256,7 +195,7 @@ export const FootageView: React.FC<FootageViewProps> = ({
       >
         <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
           {[
-            { id: "all", label: `All Clips (${sourceClips.length || 5})` },
+            { id: "all", label: `All Clips (${sourceClips.length})` },
             { id: "dialog", label: "Dialog / Talking Head" },
             { id: "broll", label: "B-Roll & Action" },
             { id: "pacing", label: "High Pacing (4+)" },
@@ -284,20 +223,45 @@ export const FootageView: React.FC<FootageViewProps> = ({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "11px", color: "#71717A" }}>
-          <span>Indexed: <strong style={{ color: "#F4F4F6" }}>{sourceClips.length || 5} clips</strong></span>
+          <span>Indexed: <strong style={{ color: "#F4F4F6" }}>{sourceClips.length} clips</strong></span>
           <span>•</span>
-          <span>CV Telemetry: <strong style={{ color: "#10B981" }}>Active</strong></span>
+          <span>Vision Analysis: <strong style={{ color: "#10B981" }}>Active</strong></span>
         </div>
       </div>
 
       {/* 3. 3-Column Video Contact Sheet Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "16px" }}>
-        {filteredClips.map((clip) => {
-          const clipPath = clip.video_url || (clip.filename ? `/static/${clip.filename.includes("upload") ? clip.filename : `samples/${clip.filename}`}` : "");
+        {filteredClips.length === 0 ? (
+          <div
+            className="studio-card"
+            style={{
+              gridColumn: "1 / -1",
+              padding: "48px 20px",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "10px",
+              color: "#71717A",
+            }}
+          >
+            <FolderUp size={32} color="#3F3F46" />
+            <p style={{ fontSize: "13px", fontWeight: 600, color: "#D4D4D8", margin: 0 }}>
+              Media Bin Is Empty
+            </p>
+            <p style={{ fontSize: "11.5px", color: "#71717A", margin: 0, maxWidth: "340px" }}>
+              Upload your raw video files above (.mp4, .mov, .webm) to populate the media bin and auto-build your timeline.
+            </p>
+          </div>
+        ) : (
+          filteredClips.map((clip) => {
+          const clipPath = clip.video_url || clip.url || "";
           const videoSrc = clipPath ? backendMediaUrl(clipPath) : "";
+          const clipId = clip.clip_id || clip.filename || "clip";
           return (
             <div
-              key={clip.clip_id}
+              key={clipId}
               className="studio-card"
               style={{
                 padding: "0",
@@ -383,7 +347,7 @@ export const FootageView: React.FC<FootageViewProps> = ({
                           flex: 1,
                           height: "4px",
                           borderRadius: "1px",
-                          backgroundColor: lvl <= clip.energy_level ? "#F59E0B" : "#222228",
+                          backgroundColor: lvl <= (clip.energy_level || 3) ? "#F59E0B" : "#222228",
                         }}
                       />
                     ))}
@@ -392,7 +356,7 @@ export const FootageView: React.FC<FootageViewProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => onAnalyzeClipFit(clip.clip_id)}
+                  onClick={() => onAnalyzeClipFit(clip.clip_id || clip.filename || "")}
                   disabled={isAnalyzingFit}
                   className="btn-secondary"
                   style={{
@@ -410,7 +374,7 @@ export const FootageView: React.FC<FootageViewProps> = ({
               </div>
             </div>
           );
-        })}
+        }))}
       </div>
 
       {/* 4. AI StoryBeat Fit Recommender Modal Overlay */}
@@ -572,7 +536,7 @@ export const FootageView: React.FC<FootageViewProps> = ({
                     <div style={{ backgroundColor: "#18181D", padding: "6px 8px", borderRadius: "4px" }}>
                       <div style={{ fontSize: "9.5px", color: "#71717A" }}>Detected Shot Type</div>
                       <div style={{ fontSize: "11.5px", fontWeight: 600, color: "#F4F4F6", textTransform: "capitalize" }}>
-                        {selectedClipFitAnalysis.shot_type.replace("_", " ")}
+                        {(selectedClipFitAnalysis.shot_type || "clip").replace("_", " ")}
                       </div>
                     </div>
                     <div style={{ backgroundColor: "#18181D", padding: "6px 8px", borderRadius: "4px" }}>
@@ -584,7 +548,7 @@ export const FootageView: React.FC<FootageViewProps> = ({
                     <div style={{ backgroundColor: "#18181D", padding: "6px 8px", borderRadius: "4px" }}>
                       <div style={{ fontSize: "9.5px", color: "#71717A" }}>Motion Score</div>
                       <div style={{ fontSize: "11.5px", fontWeight: 600, color: "#06B6D4", fontFamily: "ui-monospace, monospace" }}>
-                        {selectedClipFitAnalysis.motion_score.toFixed(2)}
+                        {(selectedClipFitAnalysis.motion_score || 0.75).toFixed(2)}
                       </div>
                     </div>
                     <div style={{ backgroundColor: "#18181D", padding: "6px 8px", borderRadius: "4px" }}>
@@ -747,7 +711,7 @@ export const FootageView: React.FC<FootageViewProps> = ({
                   <span style={{ fontSize: "10.5px", color: "#71717A", fontWeight: 600 }}>
                     ALTERNATIVE STORYBEAT MATCHES
                   </span>
-                  {selectedClipFitAnalysis.ranked_recommendations?.slice(1).map((rec) => (
+                  {selectedClipFitAnalysis.ranked_recommendations?.slice(1).map((rec: any) => (
                     <div
                       key={rec.beat_id}
                       style={{

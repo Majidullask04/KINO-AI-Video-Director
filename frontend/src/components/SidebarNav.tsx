@@ -12,7 +12,9 @@ import {
   Download,
   Share2,
   Database,
-  FolderKanban
+  FolderKanban,
+  Box,
+  Layers
 } from "lucide-react";
 import { Project } from "@/types";
 import { BrandLogo } from "./BrandLogo";
@@ -24,6 +26,7 @@ export type ScreenId =
   | "reference"
   | "footage"
   | "studio"
+  | "registry"
   | "revisions"
   | "export"
   | "publishing"
@@ -53,33 +56,19 @@ interface NavSection {
 
 const SECTIONS: NavSection[] = [
   {
-    title: "WORKSPACE",
+    title: "CREATIVE STUDIO",
     items: [
-      { id: "landing", label: "Overview", icon: Compass, shortcut: "⌘1" },
-      { id: "dashboard", label: "Productions", icon: FolderKanban, shortcut: "⌘2" },
-      { id: "wizard", label: "New Production", icon: PlusCircle, shortcut: "⌘3" },
+      { id: "studio", label: "Timeline Studio", icon: SlidersHorizontal, shortcut: "⌘1" },
+      { id: "footage", label: "Media Bin", icon: Video, shortcut: "⌘2" },
+      { id: "registry", label: "Visual Blocks", icon: Box, shortcut: "⌘3" },
+      { id: "dashboard", label: "Productions", icon: FolderKanban, shortcut: "⌘4" },
     ],
   },
   {
-    title: "INGEST & ANALYSIS",
+    title: "DELIVERY & SETTINGS",
     items: [
-      { id: "reference", label: "Reference Pacing", icon: Activity, shortcut: "⌘4" },
-      { id: "footage", label: "Media Bin & Upload", icon: Video, shortcut: "⌘5" },
-    ],
-  },
-  {
-    title: "EDITORIAL NLE",
-    items: [
-      { id: "studio", label: "Timeline Studio", icon: SlidersHorizontal, shortcut: "⌘6" },
-      { id: "revisions", label: "Version Compare", icon: GitCompare, shortcut: "⌘7" },
-    ],
-  },
-  {
-    title: "DELIVERY & SYSTEM",
-    items: [
-      { id: "export", label: "Master Export", icon: Download, shortcut: "⌘8" },
-      { id: "publishing", label: "Channels", icon: Share2, shortcut: "⌘9" },
-      { id: "settings", label: "Graph Memory", icon: Database, shortcut: "⌘0" },
+      { id: "export", label: "Export & Render", icon: Download, shortcut: "⌘5" },
+      { id: "settings", label: "Studio Settings", icon: SlidersHorizontal, shortcut: "⌘6" },
     ],
   },
 ];
@@ -104,8 +93,18 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
 
       {/* 2. Project Selector */}
       <div className="pt-1 pb-1">
-        <div className="text-[9px] font-mono font-semibold uppercase tracking-wider text-zinc-500 px-1 mb-1.5">
-          PRODUCTION
+        <div className="flex items-center justify-between px-1 mb-1.5" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="text-[9px] font-mono font-semibold uppercase tracking-wider text-zinc-500">
+            COMPOSITION
+          </span>
+          <button
+            type="button"
+            onClick={() => onSelectScreen("wizard")}
+            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
+            style={{ padding: "0", background: "none", border: "none" }}
+          >
+            + New
+          </button>
         </div>
         <select
           value={activeProject?.id || ""}
@@ -145,7 +144,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                   <div className="flex items-center gap-2 min-w-0" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <Icon
                       className={`w-3.5 h-3.5 shrink-0 ${
-                        isActive ? "text-amber-400" : "text-zinc-500"
+                        isActive ? "text-emerald-400" : "text-zinc-500"
                       }`}
                       strokeWidth={1.6}
                     />
@@ -161,27 +160,27 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         ))}
       </div>
 
-      {/* 4. Bottom Footer Actions & Telemetry */}
-      <div className="pt-2 border-t border-[#222228] space-y-2">
+      {/* 4. Bottom Footer Actions & System Status */}
+      <div className="pt-2 border-t border-[#2a2a2a] space-y-2">
         <button
-          onClick={onSeedDemo}
-          disabled={isSeeding}
-          className="btn-amber"
-          style={{ width: "100%", justifyContent: "center" }}
+          onClick={() => onSelectScreen("wizard")}
+          className="btn-green"
+          style={{ width: "100%", justifyContent: "center", fontSize: "11px", padding: "6px 10px" }}
         >
-          <span>{isSeeding ? "Loading..." : "Load Sample Production"}</span>
+          <span>+ New Production</span>
         </button>
 
-        <div className="px-2 py-1.5 rounded bg-[#09090b] border border-[#1e1e24] font-mono text-[10px] leading-relaxed text-zinc-400">
+        <div className="px-2.5 py-2 rounded bg-[#141414] border border-[#2a2a2a] text-[10px] leading-relaxed text-zinc-400">
           <div className="flex items-center justify-between" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="text-zinc-300 flex items-center gap-1.5" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span>FalkorDB 6379</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-mono font-medium">KINO</span>
             </span>
-            <span className="text-emerald-400">Connected</span>
+            <span className="text-emerald-400 font-mono text-[9.5px]">Deterministic 30fps</span>
           </div>
-          <div className="text-zinc-500 text-[9.5px] mt-0.5">
-            {nodeCount} Nodes • {edgeCount} Edges • 0.4ms
+          <div className="text-zinc-500 font-mono text-[9.5px] mt-1 flex justify-between">
+            <span>Local CLI Bridge</span>
+            <span className="text-emerald-400">Node v24 • FFmpeg 7.0</span>
           </div>
         </div>
       </div>

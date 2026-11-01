@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Search, Plus, ArrowRight } from "lucide-react";
+import { Search, Plus, ArrowRight, Film } from "lucide-react";
 import { Project, formatSMPTE } from "@/types";
 import { DEMO_REFERENCE_VIDEO } from "@/utils/media";
 
@@ -30,7 +30,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const filteredProjects = projects.filter(
     (p) =>
       p.title.toLowerCase().includes(projectSearch.toLowerCase()) ||
-      p.category.toLowerCase().includes(projectSearch.toLowerCase())
+      (p.category || "").toLowerCase().includes(projectSearch.toLowerCase())
   );
 
   return (
@@ -85,12 +85,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             onClick={onSeedDemo}
             disabled={isSeeding}
             className="btn-secondary"
+            style={{ fontSize: "11px", padding: "6px 12px" }}
           >
-            {isSeeding ? "Seeding..." : "Quick Re-Seed"}
+            {isSeeding ? "Loading..." : "Load Demo Project"}
           </button>
           <button
             onClick={onNewProject}
             className="btn-primary"
+            style={{ fontSize: "11px", padding: "6px 12px" }}
           >
             <Plus size={14} strokeWidth={2} />
             <span>New Production</span>
@@ -115,34 +117,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 boxShadow: isCurrentActive ? "0 0 0 1px #F59E0B" : "none",
               }}
             >
-              {/* 16:9 Real Video Thumbnail Header */}
+              {/* Project Card Header Thumbnail */}
               <div
                 style={{
                   aspectRatio: "16/9",
-                  backgroundColor: "#050507",
+                  backgroundColor: "#070709",
                   position: "relative",
                   overflow: "hidden",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  borderBottom: "1px solid #1C1C22",
                 }}
+                onClick={() => onOpenProjectInStudio(p)}
               >
-                <video
-                  src={`${DEMO_REFERENCE_VIDEO}#t=0.5`}
-                  muted
-                  playsInline
-                  loop
-                  onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.pause();
-                    e.currentTarget.currentTime = 0.5;
-                  }}
+                <div
                   style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    display: "block",
-                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    color: "#71717A",
                   }}
-                  onClick={() => onOpenProjectInStudio(p)}
-                />
+                >
+                  <Film size={26} color={isCurrentActive ? "#F59E0B" : "#3F3F46"} strokeWidth={1.5} />
+                  <span style={{ fontSize: "11px", color: isCurrentActive ? "#F4F4F6" : "#71717A", fontWeight: 500 }}>
+                    {p.title}
+                  </span>
+                </div>
 
                 <div style={{ position: "absolute", top: "8px", left: "8px", pointerEvents: "none" }}>
                   <span className="tech-tag" style={{ backgroundColor: "rgba(12, 12, 14, 0.85)" }}>
@@ -182,7 +186,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     className="btn-secondary"
                     style={{ padding: "4px 8px", fontSize: "11px" }}
                   >
-                    Diff Lineage
+                    Versions
                   </button>
                   <button
                     onClick={() => onOpenProjectInStudio(p)}

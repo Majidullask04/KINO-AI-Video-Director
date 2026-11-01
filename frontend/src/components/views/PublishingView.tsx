@@ -161,7 +161,7 @@ export function PublishingView({
           }}
         >
           <CheckCircle2 size={16} color="#10B981" />
-          <span>Staged dispatch confirmed in FalkorDB ledger. Manual producer sign-off holds release until approval.</span>
+          <span>Staged dispatch confirmed in project registry ledger. Manual producer sign-off holds release until approval.</span>
         </div>
       )}
     </div>

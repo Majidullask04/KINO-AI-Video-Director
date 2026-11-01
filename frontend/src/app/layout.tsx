@@ -15,8 +15,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "KINO STUDIO — Non-Linear Editing System Powered by FalkorDB",
-  description: "Autonomous video editing platform powered by FalkorDB property graph, multi-agent reasoning, and multimodal lineage tracking.",
+  title: "KINO — AI Video Director",
+  description: "Local-first AI Video Director powered by deterministic HTML compositions and CLI coding agents.",
 };
 
 export default function RootLayout({
@@ -29,7 +29,7 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${jetbrainsMono.variable} h-full antialiased dark`}
     >
-      <body className="min-h-full flex flex-col bg-[#09090b] text-[#f4f4f6] font-sans antialiased selection:bg-[#f59e0b]/30 selection:text-white">
+      <body className="min-h-full flex flex-col bg-[#0F0F0E] text-[#F4F4F2] font-sans antialiased selection:bg-[#34D399]/30 selection:text-white">
         {children}
       </body>
     </html>

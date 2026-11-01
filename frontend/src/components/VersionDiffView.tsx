@@ -2,6 +2,7 @@
 
 import React, { useState, useRef } from "react";
 import { EditVersion, VersionDiffItem, formatSMPTE } from "@/types";
+import { backendMediaUrl } from "@/utils/media";
 import {
   GitCompare,
   ArrowRight,
@@ -81,10 +82,10 @@ export const VersionDiffView: React.FC<VersionDiffViewProps> = ({
           <div>
             <h2 className="text-sm font-semibold text-[#f4f4f6] flex items-center gap-2">
               <GitCompare className="w-4 h-4 text-amber-500" strokeWidth={1.6} />
-              <span>Lineage DAG & Version History</span>
+              <span>Timeline Revisions & Version Comparison</span>
             </h2>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Immutable EditVersion nodes connected via [:DERIVED_FROM] graph edges.
+              Review what changed between editorial revisions with synchronized side-by-side playback.
             </p>
           </div>
 
@@ -159,7 +160,7 @@ export const VersionDiffView: React.FC<VersionDiffViewProps> = ({
                 {idx < versions.length - 1 && (
                   <div className="flex flex-col items-center text-zinc-600 shrink-0">
                     <ArrowRight className="w-3.5 h-3.5 text-zinc-500" />
-                    <span className="text-[8px] font-mono text-zinc-600">[:DERIVED_FROM]</span>
+                    <span className="text-[8.5px] text-zinc-500">Revised</span>
                   </div>
                 )}
               </React.Fragment>
@@ -227,7 +228,7 @@ export const VersionDiffView: React.FC<VersionDiffViewProps> = ({
               {v1Obj?.preview_url ? (
                 <video
                   ref={videoARef}
-                  src={v1Obj.preview_url}
+                  src={backendMediaUrl(v1Obj.preview_url)}
                   onTimeUpdate={handleVideoTimeUpdate}
                   className="w-full h-full object-contain"
                 />
@@ -254,7 +255,7 @@ export const VersionDiffView: React.FC<VersionDiffViewProps> = ({
               {v2Obj?.preview_url ? (
                 <video
                   ref={videoBRef}
-                  src={v2Obj.preview_url}
+                  src={backendMediaUrl(v2Obj.preview_url)}
                   className="w-full h-full object-contain"
                 />
               ) : (
@@ -267,15 +268,15 @@ export const VersionDiffView: React.FC<VersionDiffViewProps> = ({
         </div>
       </div>
 
-      {/* 3. Bottom Card: Clean architectural diff table */}
+      {/* 3. Bottom Card: Clean version diff table */}
       <div className="studio-card p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-[#f4f4f6] flex items-center gap-2">
             <Layers className="w-3.5 h-3.5 text-amber-500" strokeWidth={1.6} />
-            <span>FalkorDB Cut Diff Matrix (Cypher Query 4)</span>
+            <span>Timeline Cut Diff Matrix</span>
           </h3>
-          <span className="text-[10px] text-zinc-500 font-mono">
-            Direct graph-traversal delta between v{v1Obj?.version_num || 1} and v{v2Obj?.version_num || 2}
+          <span className="text-[10px] text-zinc-500">
+            Cut comparisons and editorial rationale between v{v1Obj?.version_num || 1} and v{v2Obj?.version_num || 2}
           </span>
         </div>
 

@@ -33,3 +33,12 @@ backend/static/uploads/*
 backend/static/*.mov
 *.mov
 !backend/static/samples/*.mp4
+
+# Local runtime project workspaces
+projects/*
+!projects/.gitkeep
+
+# Local binary cache
+bin/*
+!bin/.gitkeep
+

@@ -12,23 +12,30 @@ import {
   GraphState,
   FeedbackSummary,
   ClipFitAnalysis,
+  VersionDiffItem,
 } from "@/types";
-import { Cpu } from "lucide-react";
+import { Cpu, ShieldCheck, History } from "lucide-react";
 import { API_BASE, backendMediaUrl } from "@/utils/media";
 
 // Modular Studio Views
+import { HomeDashboardView } from "@/components/views/HomeDashboardView";
 import { LandingView } from "@/components/views/LandingView";
 import { DashboardView } from "@/components/views/DashboardView";
 import { WizardView } from "@/components/views/WizardView";
 import { ReferenceView } from "@/components/views/ReferenceView";
 import { FootageView } from "@/components/views/FootageView";
 import { StudioView } from "@/components/views/StudioView";
+import { RegistryView } from "@/components/views/RegistryView";
 import { ExportView } from "@/components/views/ExportView";
 import { PublishingView } from "@/components/views/PublishingView";
 import { SettingsView } from "@/components/views/SettingsView";
+import { VersionDiffView } from "@/components/VersionDiffView";
+import { HyperFramesLintModal } from "@/components/HyperFramesLintModal";
+import { CheckpointHistoryModal } from "@/components/CheckpointHistoryModal";
+import { CliTerminalDrawer } from "@/components/CliTerminalDrawer";
 
 export default function Home() {
-  const [currentScreen, setCurrentScreen] = useState<ScreenId>("studio");
+  const [currentScreen, setCurrentScreen] = useState<ScreenId>("landing");
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [referenceBeats, setReferenceBeats] = useState<StoryBeat[]>([]);
@@ -38,6 +45,7 @@ export default function Home() {
   const [selectedDecision, setSelectedDecision] = useState<CutDecision | null>(null);
   const [graphState, setGraphState] = useState<GraphState | null>(null);
   const [preferences, setPreferences] = useState<CreatorPreference[]>([]);
+  const [isTerminalOpen, setIsTerminalOpen] = useState<boolean>(false);
 
   const [activePreviewUrl, setActivePreviewUrl] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -57,6 +65,11 @@ export default function Home() {
   const [isAssigningClip, setIsAssigningClip] = useState<boolean>(false);
   const [toastNotice, setToastNotice] = useState<string | null>(null);
   const [directorBriefing, setDirectorBriefing] = useState<string | null>(null);
+
+  // Version Diff State
+  const [diffItems, setDiffItems] = useState<VersionDiffItem[]>([]);
+  const [isGlobalLintModalOpen, setIsGlobalLintModalOpen] = useState<boolean>(false);
+  const [isGlobalCheckpointModalOpen, setIsGlobalCheckpointModalOpen] = useState<boolean>(false);
 
   // Publishing Human-in-the-Loop Toggle
   const [requireHumanApproval, setRequireHumanApproval] = useState<boolean>(true);
@@ -91,8 +104,11 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         setProjects(data.projects || []);
-        if (data.projects && data.projects.length > 0 && !activeProject) {
-          loadProjectDetails(data.projects[0]);
+        if (data.projects && data.projects.length > 0) {
+          const currentValid = data.projects.find((p: Project) => p.id === activeProject?.id);
+          if (!currentValid) {
+            loadProjectDetails(data.projects[0]);
+          }
         }
       }
     } catch (e) {
@@ -148,6 +164,21 @@ export default function Home() {
       }
     } catch (e) {
       console.warn("Could not fetch graph state:", e);
+    }
+  };
+
+  const handleFetchVersionDiff = async (v1Id: string, v2Id: string) => {
+    if (!activeProject || !v1Id || !v2Id) return;
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/projects/${activeProject.id}/diff?v1=${v1Id}&v2=${v2Id}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setDiffItems(data.beat_diffs || []);
+      }
+    } catch (e) {
+      console.warn("Could not fetch version diff:", e);
     }
   };
 
@@ -318,7 +349,7 @@ export default function Home() {
       });
 
       if (res.ok) {
-        setUploadStatusText("Synthesizing timeline edit in FalkorDB...");
+        setUploadStatusText("Synthesizing timeline edit in STORYBOARD.md...");
         const data = await res.json();
         await loadProjectDetails(targetProject);
 
@@ -432,13 +463,15 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         await loadProjectDetails(targetProject);
-        if (data.version?.preview_url) {
-          setActivePreviewUrl(backendMediaUrl(data.version.preview_url));
+        const resolvedPreview = data.version?.preview_url || data.preview_url;
+        const resolvedTraceability = data.version?.traceability || data.traceability;
+        if (resolvedPreview) {
+          setActivePreviewUrl(backendMediaUrl(resolvedPreview));
         }
-        if (data.version?.traceability) {
-          setDecisions(data.version.traceability);
-          if (data.version.traceability.length > 0) {
-            setSelectedDecision(data.version.traceability[0]);
+        if (resolvedTraceability) {
+          setDecisions(resolvedTraceability);
+          if (resolvedTraceability.length > 0) {
+            setSelectedDecision(resolvedTraceability[0]);
           }
         }
         setSelectedClipFitAnalysis(null);
@@ -541,246 +574,108 @@ export default function Home() {
     }
   };
 
+  const handleCreateNewProject = async (prompt: string, cuts: string[]) => {
+    const title = prompt.slice(0, 32).trim() || "Untitled Production";
+    try {
+      const res = await fetch(`${API_BASE}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          target_duration: cuts.length > 0 ? cuts.length * 3.0 : 12.0,
+          aspect_ratio: "16:9",
+          category: "Social / Explainer",
+          mood: "energetic",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const newProj = data.project;
+        if (newProj) {
+          // Persist the user brief & cuts to STORYBOARD.md
+          const storyboardContent = `# Storyboard: ${newProj.title}\n\n## Creative Brief\n${prompt}\n\n## Scene Beats\n${cuts.map((c, i) => `### Beat 0${i + 1}: ${c}\n- Target Duration: 3.0s\n- Style: Kinetic Overlay & Reveal\n`).join("\n")}\n`;
+          await fetch(`${API_BASE}/api/projects/${newProj.id}/files/STORYBOARD.md`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: storyboardContent }),
+          }).catch(() => {});
+
+          await fetchProjects();
+          await loadProjectDetails(newProj);
+          setCurrentScreen("studio");
+        }
+      }
+    } catch (e) {
+      console.error("Error creating project:", e);
+    }
+  };
+
+  const handleUpdateProjectTitle = async (newTitle: string) => {
+    if (!activeProject) return;
+    try {
+      const metaRes = await fetch(`${API_BASE}/api/projects/${activeProject.id}/files/meta.json`);
+      let meta: any = {};
+      if (metaRes.ok) {
+        const d = await metaRes.json();
+        try {
+          meta = JSON.parse(d.content);
+        } catch {}
+      }
+      meta = { ...meta, title: newTitle };
+      await fetch(`${API_BASE}/api/projects/${activeProject.id}/files/meta.json`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: JSON.stringify(meta, null, 2) }),
+      });
+      await fetchProjects();
+      setActiveProject((prev) => (prev ? { ...prev, title: newTitle } : null));
+    } catch (e) {
+      console.warn("Could not update project title:", e);
+    }
+  };
+
   return (
-    <div className="app-shell">
-      {/* 1. Left Studio Navigation Rail */}
-      <SidebarNav
-        currentScreen={currentScreen}
-        onSelectScreen={setCurrentScreen}
-        projects={projects}
+    <div className="w-screen h-screen bg-[#0F0F0E] overflow-hidden select-none">
+      {currentScreen === "landing" ? (
+        <HomeDashboardView
+          projects={projects}
+          activeProject={activeProject}
+          onSelectProject={(p) => loadProjectDetails(p)}
+          onOpenStudio={() => setCurrentScreen("studio")}
+          onCreateNewProject={handleCreateNewProject}
+          onRefreshProjects={fetchProjects}
+        />
+      ) : (
+        <StudioView
+          activeProject={activeProject}
+          activePreviewUrl={activePreviewUrl}
+          versions={versions}
+          decisions={decisions}
+          selectedDecision={selectedDecision}
+          graphState={graphState}
+          preferences={preferences}
+          directorBriefing={directorBriefing}
+          isRevising={isRevising}
+          isUploadingFootage={isUploadingFootage}
+          uploadStatusText={uploadStatusText}
+          isSubmittingFeedback={isSubmittingFeedback}
+          onSelectDecision={setSelectedDecision}
+          onSendRevision={handleSendRevision}
+          onRefreshGraph={() => activeProject && refreshGraphState(activeProject.id)}
+          onSubmitFeedback={handleSubmitFeedback}
+          onUploadFootageFiles={handleUploadFootageFiles}
+          onGoHome={() => setCurrentScreen("landing")}
+          onOpenTerminal={() => setIsTerminalOpen(true)}
+          onUpdateProjectTitle={handleUpdateProjectTitle}
+        />
+      )}
+
+      {/* Integrated Host CLI & Agent Runner Drawer */}
+      <CliTerminalDrawer
         activeProject={activeProject}
-        onSelectProject={(p) => loadProjectDetails(p)}
-        onSeedDemo={handleSeedDemo}
-        isSeeding={isSeeding}
-        nodeCount={graphState?.nodes.length || 17}
-        edgeCount={graphState?.edges.length || 16}
+        isOpen={isTerminalOpen}
+        onToggle={() => setIsTerminalOpen(!isTerminalOpen)}
       />
-
-      {/* Main Studio Canvas Area */}
-      <main className="main-workspace">
-        {/* Top Header Bar */}
-        <header className="top-header">
-          {/* Left: Breadcrumbs + Project Tag + Format */}
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-            <span style={{ color: "#71717A", fontSize: "12px", fontWeight: 500 }}>
-              Productions
-            </span>
-            <span style={{ color: "#3F3F46", fontSize: "12px" }}>/</span>
-            <span
-              style={{
-                color: "#F4F4F6",
-                fontSize: "12.5px",
-                fontWeight: 600,
-                letterSpacing: "-0.01em",
-                maxWidth: "240px",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {activeProject ? activeProject.title : "Director.AI Studio"}
-            </span>
-
-            <span className="tech-tag">
-              {activeProject?.aspect_ratio || "16:9"}
-            </span>
-            <span className="tech-tag">
-              1080P • 24FPS
-            </span>
-          </div>
-
-          {/* Center: Segmented 4-Step Control */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              backgroundColor: "#121215",
-              border: "1px solid #222228",
-              borderRadius: "5px",
-              padding: "2px",
-              gap: "2px",
-            }}
-          >
-            {[
-              { id: "reference", label: "01 Reference" },
-              { id: "footage", label: "02 Media Bin & Upload" },
-              { id: "studio", label: "03 Timeline Studio" },
-              { id: "revisions", label: "04 Compare & Export" },
-            ].map((tab) => {
-              const isActive = currentScreen === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setCurrentScreen(tab.id as ScreenId)}
-                  style={{
-                    backgroundColor: isActive ? "#1C1C22" : "transparent",
-                    color: isActive ? "#F4F4F6" : "#71717A",
-                    border: isActive ? "1px solid #2E2E38" : "1px solid transparent",
-                    padding: "3px 10px",
-                    fontSize: "11px",
-                    fontWeight: isActive ? 600 : 450,
-                    borderRadius: "4px",
-                    lineHeight: 1.3,
-                  }}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Right: Compile Cut Action */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <button
-              type="button"
-              onClick={handleGeneratePlan}
-              disabled={isLoading || !activeProject}
-              className="btn-primary"
-              style={{ opacity: isLoading ? 0.7 : 1 }}
-            >
-              <Cpu size={13} strokeWidth={1.75} />
-              <span>{isLoading ? "Compiling..." : "Compile Cut"}</span>
-            </button>
-          </div>
-        </header>
-
-        {/* Dynamic Studio Views Router */}
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
-            overflowY: currentScreen === "studio" ? "hidden" : "auto",
-            padding: "0",
-            width: "100%",
-          }}
-        >
-          {currentScreen === "landing" && (
-            <LandingView
-              activeProject={activeProject}
-              activePreviewUrl={activePreviewUrl}
-              versions={versions}
-              preferences={preferences}
-              isSeeding={isSeeding}
-              onOpenStudio={() => setCurrentScreen("studio")}
-              onSeedDemo={handleSeedDemo}
-              onManagePreferences={() => setCurrentScreen("settings")}
-            />
-          )}
-
-          {currentScreen === "dashboard" && (
-            <DashboardView
-              projects={projects}
-              activeProject={activeProject}
-              isSeeding={isSeeding}
-              onSelectProject={(p) => loadProjectDetails(p)}
-              onOpenProjectInStudio={(p) => {
-                loadProjectDetails(p);
-                setCurrentScreen("studio");
-              }}
-              onOpenProjectDiff={(p) => {
-                loadProjectDetails(p);
-                setCurrentScreen("revisions");
-              }}
-              onSeedDemo={handleSeedDemo}
-              onNewProject={() => setCurrentScreen("wizard")}
-            />
-          )}
-
-          {currentScreen === "wizard" && (
-            <WizardView
-              isLoading={isLoading}
-              onCreateProject={handleCreateProjectSubmit}
-            />
-          )}
-
-          {currentScreen === "reference" && (
-            <ReferenceView
-              referenceBeats={referenceBeats}
-              isLoading={isLoading}
-              onAnalyzeReference={handleAnalyzeReference}
-            />
-          )}
-
-          {currentScreen === "footage" && (
-            <FootageView
-              sourceClips={sourceClips}
-              isUploadingFootage={isUploadingFootage}
-              uploadStatusText={uploadStatusText}
-              selectedClipFitAnalysis={selectedClipFitAnalysis}
-              isAnalyzingFit={isAnalyzingFit}
-              isAssigningClip={isAssigningClip}
-              toastNotice={toastNotice}
-              onUploadFootageFiles={handleUploadFootageFiles}
-              onLoadDemoFootage={handleLoadDemoFootage}
-              onAnalyzeClipFit={handleAnalyzeClipFit}
-              onAssignClipToBeat={handleAssignClipToBeat}
-              onCloseFitModal={() => setSelectedClipFitAnalysis(null)}
-              onCloseToast={() => setToastNotice(null)}
-            />
-          )}
-
-          {currentScreen === "studio" && (
-            <StudioView
-              activeProject={activeProject}
-              activePreviewUrl={activePreviewUrl}
-              versions={versions}
-              decisions={decisions}
-              selectedDecision={selectedDecision}
-              graphState={graphState}
-              preferences={preferences}
-              directorBriefing={directorBriefing}
-              isRevising={isRevising}
-              isUploadingFootage={isUploadingFootage}
-              uploadStatusText={uploadStatusText}
-              isSubmittingFeedback={isSubmittingFeedback}
-              onSelectDecision={(d) => setSelectedDecision(d)}
-              onSendRevision={handleSendRevision}
-              onRefreshGraph={() => {
-                if (activeProject) refreshGraphState(activeProject.id);
-              }}
-              onSubmitFeedback={handleSubmitFeedback}
-              onUploadFootageFiles={handleUploadFootageFiles}
-            />
-          )}
-
-          {currentScreen === "revisions" && (
-            <ExportView
-              activeProject={activeProject}
-              activePreviewUrl={activePreviewUrl}
-              versions={versions}
-              decisions={decisions}
-            />
-          )}
-
-          {currentScreen === "publishing" && (
-            <PublishingView
-              requireHumanApproval={requireHumanApproval}
-              setRequireHumanApproval={setRequireHumanApproval}
-              sandboxPushed={sandboxPushed}
-              setSandboxPushed={setSandboxPushed}
-            />
-          )}
-
-          {currentScreen === "settings" && (
-            <SettingsView
-              graphState={graphState}
-              preferences={preferences}
-              handleTriggerTasteLearning={handleTriggerTasteLearning}
-              isLearningTaste={isLearningTaste}
-              feedbackSummary={feedbackSummary}
-              handleDeletePreference={handleDeletePreference}
-              handleAddPreference={handleAddPreference}
-              newPrefCategory={newPrefCategory}
-              setNewPrefCategory={setNewPrefCategory}
-              newPrefRule={newPrefRule}
-              setNewPrefRule={setNewPrefRule}
-            />
-          )}
-        </div>
-      </main>
     </div>
   );
 }

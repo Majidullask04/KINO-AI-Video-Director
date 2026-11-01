@@ -44,13 +44,13 @@ export const WizardView: React.FC<WizardViewProps> = ({
         <div className="studio-card" style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "20px" }}>
           <div>
             <span style={{ fontSize: "10px", fontFamily: "ui-monospace, monospace", color: "#F59E0B", fontWeight: 600, letterSpacing: "0.06em" }}>
-              SPECIFICATION SHEET // 01
+              STEP 01 // PRODUCTION BRIEF
             </span>
             <h2 style={{ fontSize: "15px", fontWeight: 700, color: "#F4F4F6", margin: "4px 0 2px 0" }}>
-              Production Brief & Content Scope
+              Production Scope & Editorial Direction
             </h2>
             <p style={{ fontSize: "12px", color: "#8E8E98", margin: 0 }}>
-              Define core project metadata. A dedicated (:Project) node will be committed to the FalkorDB property graph.
+              Define core production goals. The AI Director will calibrate pacing, shot selection, and narrative rhythm to match your brief.
             </p>
           </div>
 
@@ -148,14 +148,14 @@ export const WizardView: React.FC<WizardViewProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Technical Raster & Graph Schema */}
+        {/* Right Column: Technical Specifications */}
         <div className="studio-card" style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "20px" }}>
           <div>
             <span style={{ fontSize: "10px", fontFamily: "ui-monospace, monospace", color: "#F59E0B", fontWeight: 600, letterSpacing: "0.06em" }}>
-              SPECIFICATION SHEET // 02
+              STEP 02 // TECHNICAL SPECS
             </span>
             <h2 style={{ fontSize: "15px", fontWeight: 700, color: "#F4F4F6", margin: "4px 0 2px 0" }}>
-              Technical Raster & Graph Schema
+              Canvas Format & Pacing Profile
             </h2>
             <p style={{ fontSize: "12px", color: "#8E8E98", margin: 0 }}>
               Configure resolution constraints, frame pacing, and audio emotional resonance.

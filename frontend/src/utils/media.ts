@@ -1,4 +1,4 @@
-export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "https://kino-ai-video-director.onrender.com").replace(/\/+$/, "");
+export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001").replace(/\/+$/, "");
 
 export const backendMediaUrl = (path: string): string => {
   if (!path) return "";

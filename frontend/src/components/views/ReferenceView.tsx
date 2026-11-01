@@ -221,7 +221,7 @@ export const ReferenceView: React.FC<ReferenceViewProps> = ({
                       flex: 1,
                       height: "4px",
                       borderRadius: "1px",
-                      backgroundColor: lvl <= b.energy_level ? "#F59E0B" : "#222228",
+                      backgroundColor: lvl <= (b.energy_level || 3) ? "#F59E0B" : "#222228",
                     }}
                   />
                 ))}
@@ -232,7 +232,7 @@ export const ReferenceView: React.FC<ReferenceViewProps> = ({
               </div>
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "auto" }}>
-                {(b.required_tags || [b.role]).map((tag) => (
+                {(b.required_tags || [b.role]).map((tag: string) => (
                   <span key={tag} className="tech-tag" style={{ fontSize: "9px", padding: "1px 4px" }}>
                     {tag}
                   </span>
