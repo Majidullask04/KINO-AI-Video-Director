@@ -194,7 +194,13 @@ export interface TimelineClip {
   audio?: ClipAudio;
   animation?: ClipAnimation;
   keyframes?: ClipKeyframe[];
-  filter?: "none" | "blur" | "glow" | "bw" | "vintage" | "contrast" | "vignette";
+  filter?: "none" | "blur" | "glow" | "bw" | "vintage" | "contrast" | "vignette" | "teal";
+  filterAdjustments?: {
+    brightness?: number; // 50 to 150 (default 100)
+    contrast?: number; // 50 to 150 (default 100)
+    saturation?: number; // 0 to 200 (default 100)
+    blur?: number; // 0 to 20 (default 0)
+  };
   transition?: {
     type: "none" | "cross-dissolve" | "whip-pan" | "zoom" | "glitch" | "slide";
     duration: number;
@@ -229,9 +235,11 @@ export interface TimelineProjectState {
 }
 
 export interface LocalAssetRecord {
+  id?: string;
   filename: string;
   filepath?: string;
   url: string;
+  thumbnailUrl?: string;
   blob?: Blob;
   duration: number;
   width?: number;
@@ -242,6 +250,14 @@ export interface LocalAssetRecord {
   has_video: boolean;
   aspect_ratio?: string;
   created_at: number;
+}
+
+export interface ProjectCheckpoint {
+  id: string;
+  projectId: string;
+  name: string;
+  timestamp: number;
+  timeline: TimelineProjectState;
 }
 
 

@@ -6,6 +6,7 @@ import {
   TimelineProjectState,
   TimelineClip,
   LocalAssetRecord,
+  ProjectCheckpoint,
 } from "@/types";
 import { API_BASE } from "@/utils/media";
 import {
@@ -15,7 +16,7 @@ import {
 } from "./html-serializer";
 
 const DB_NAME = "kino_studio_db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let isBackendAvailableCache: boolean | null = null;
 let lastCheckTime = 0;
@@ -76,6 +77,9 @@ function openDatabase(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains("timelines")) {
         db.createObjectStore("timelines", { keyPath: "projectId" });
+      }
+      if (!db.objectStoreNames.contains("checkpoints")) {
+        db.createObjectStore("checkpoints", { keyPath: "id" });
       }
     };
 
@@ -329,13 +333,16 @@ export async function saveFile(projectId: string, filename: string, content: str
 export async function saveAsset(projectId: string, file: File): Promise<LocalAssetRecord> {
   const isOnline = await checkBackendAvailability();
   const blobUrl = URL.createObjectURL(file);
+  const assetId = `asset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-  // Extract client-side media telemetry
+  // Extract client-side media telemetry with thumbnail frame capture
   const telemetry = await inspectClientMedia(file, blobUrl);
 
   const assetRecord: LocalAssetRecord = {
+    id: assetId,
     filename: file.name,
     url: blobUrl,
+    thumbnailUrl: telemetry.thumbnailUrl,
     blob: file,
     duration: telemetry.duration || 4.0,
     width: telemetry.width,
@@ -374,6 +381,25 @@ export async function saveAsset(projectId: string, file: File): Promise<LocalAss
   return assetRecord;
 }
 
+export async function deleteAsset(projectId: string, assetIdOrFilename: string): Promise<void> {
+  const db = await openDatabase();
+  const tx = db.transaction("assets", "readwrite");
+  const store = tx.objectStore("assets");
+  store.delete(assetIdOrFilename);
+  store.delete(`${projectId}/${assetIdOrFilename}`);
+
+  const isOnline = await checkBackendAvailability();
+  if (isOnline) {
+    try {
+      await fetch(`${API_BASE}/api/projects/${projectId}/assets/${encodeURIComponent(assetIdOrFilename)}`, {
+        method: "DELETE",
+      });
+    } catch (e) {
+      console.warn("Backend asset deletion error:", e);
+    }
+  }
+}
+
 export async function listAssets(projectId: string): Promise<LocalAssetRecord[]> {
   const isOnline = await checkBackendAvailability();
 
@@ -382,7 +408,8 @@ export async function listAssets(projectId: string): Promise<LocalAssetRecord[]>
       const res = await fetch(`${API_BASE}/api/projects/${projectId}/manifest`);
       if (res.ok) {
         const data = await res.json();
-        return (data.assets || []).map((a: any) => ({
+        const backendAssets = (data.assets || []).map((a: any) => ({
+          id: a.id || `${projectId}/${a.filename}`,
           filename: a.filename,
           url: `${API_BASE}${a.url || a.video_url}`,
           duration: a.duration || 4.0,
@@ -393,6 +420,7 @@ export async function listAssets(projectId: string): Promise<LocalAssetRecord[]>
           has_video: !!a.has_video,
           created_at: Date.now(),
         }));
+        if (backendAssets.length > 0) return backendAssets;
       }
     } catch (e) {
       console.warn("Backend manifest fetch failed:", e);
@@ -400,6 +428,66 @@ export async function listAssets(projectId: string): Promise<LocalAssetRecord[]>
   }
 
   return await getAssetsFromIndexedDb(projectId);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Checkpoints Management (Snapshots in IndexedDB + Git)
+// ─────────────────────────────────────────────────────────────
+
+export async function listCheckpoints(projectId: string): Promise<ProjectCheckpoint[]> {
+  const db = await openDatabase();
+  const tx = db.transaction("checkpoints", "readonly");
+  const req = tx.objectStore("checkpoints").getAll();
+  return new Promise((resolve) => {
+    req.onsuccess = () => {
+      const records = (req.result || []) as ProjectCheckpoint[];
+      const filtered = records
+        .filter((c) => c.projectId === projectId)
+        .sort((a, b) => b.timestamp - a.timestamp);
+      resolve(filtered);
+    };
+    req.onerror = () => resolve([]);
+  });
+}
+
+export async function createCheckpoint(
+  projectId: string,
+  name: string,
+  timeline: TimelineProjectState
+): Promise<ProjectCheckpoint> {
+  const checkpoint: ProjectCheckpoint = {
+    id: `cp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    projectId,
+    name: name.trim() || `Snapshot ${new Date().toLocaleTimeString()}`,
+    timestamp: Date.now(),
+    timeline: JSON.parse(JSON.stringify(timeline)),
+  };
+
+  const db = await openDatabase();
+  const tx = db.transaction("checkpoints", "readwrite");
+  tx.objectStore("checkpoints").put(checkpoint);
+
+  // If online, also commit to git backend
+  const isOnline = await checkBackendAvailability();
+  if (isOnline) {
+    try {
+      await fetch(`${API_BASE}/api/checkpoints/${projectId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: checkpoint.name }),
+      });
+    } catch (e) {
+      console.warn("Backend checkpoint creation failed:", e);
+    }
+  }
+
+  return checkpoint;
+}
+
+export async function deleteCheckpoint(checkpointId: string): Promise<void> {
+  const db = await openDatabase();
+  const tx = db.transaction("checkpoints", "readwrite");
+  tx.objectStore("checkpoints").delete(checkpointId);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -537,7 +625,7 @@ async function getAssetsFromIndexedDb(projectId: string): Promise<LocalAssetReco
 }
 
 /**
- * Client-Side Video/Audio Telemetry Extractor (runs 100% in browser)
+ * Client-Side Video/Audio Telemetry Extractor (runs 100% in browser with frame capture)
  */
 function inspectClientMedia(file: File, url: string): Promise<{
   duration: number;
@@ -546,27 +634,72 @@ function inspectClientMedia(file: File, url: string): Promise<{
   fps?: number;
   hasAudio: boolean;
   hasVideo: boolean;
+  thumbnailUrl?: string;
 }> {
   return new Promise((resolve) => {
-    const isVideo = file.type.startsWith("video");
-    const isAudio = file.type.startsWith("audio");
+    const isVideo = file.type.startsWith("video") || file.name.match(/\.(mp4|mov|webm|m4v)$/i);
+    const isAudio = file.type.startsWith("audio") || file.name.match(/\.(mp3|wav|ogg|aac|m4a)$/i);
+    const isImage = file.type.startsWith("image") || file.name.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i);
 
     if (isVideo) {
       const video = document.createElement("video");
-      video.preload = "metadata";
+      video.preload = "auto";
       video.src = url;
+      video.muted = true;
+      video.playsInline = true;
+
+      const timeout = setTimeout(() => {
+        resolve({ duration: 4.0, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true });
+      }, 3500);
+
       video.onloadedmetadata = () => {
-        resolve({
-          duration: Math.max(1, Math.round(video.duration * 10) / 10),
-          width: video.videoWidth || 1920,
-          height: video.videoHeight || 1080,
-          fps: 30,
-          hasVideo: true,
-          hasAudio: true,
-        });
+        const dur = Math.max(0.5, Math.round(video.duration * 10) / 10);
+        const w = video.videoWidth || 1920;
+        const h = video.videoHeight || 1080;
+        video.currentTime = Math.min(0.5, dur / 2);
+
+        video.onseeked = () => {
+          clearTimeout(timeout);
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = 320;
+            canvas.height = 180;
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+              ctx.drawImage(video, 0, 0, 320, 180);
+              const thumb = canvas.toDataURL("image/jpeg", 0.7);
+              resolve({ duration: dur, width: w, height: h, fps: 30, hasVideo: true, hasAudio: true, thumbnailUrl: thumb });
+              return;
+            }
+          } catch {}
+          resolve({ duration: dur, width: w, height: h, fps: 30, hasVideo: true, hasAudio: true });
+        };
       };
+
       video.onerror = () => {
-        resolve({ duration: 4.0, width: 1920, height: 1080, hasVideo: true, hasAudio: false });
+        clearTimeout(timeout);
+        resolve({ duration: 4.0, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: false });
+      };
+    } else if (isImage) {
+      const img = new Image();
+      img.src = url;
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = 320;
+          canvas.height = 180;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, 320, 180);
+            const thumb = canvas.toDataURL("image/jpeg", 0.7);
+            resolve({ duration: 5.0, width: img.naturalWidth || 1920, height: img.naturalHeight || 1080, hasVideo: false, hasAudio: false, thumbnailUrl: thumb });
+            return;
+          }
+        } catch {}
+        resolve({ duration: 5.0, width: img.naturalWidth || 1920, height: img.naturalHeight || 1080, hasVideo: false, hasAudio: false, thumbnailUrl: url });
+      };
+      img.onerror = () => {
+        resolve({ duration: 5.0, width: 1920, height: 1080, hasVideo: false, hasAudio: false });
       };
     } else if (isAudio) {
       const audio = document.createElement("audio");
@@ -583,7 +716,7 @@ function inspectClientMedia(file: File, url: string): Promise<{
         resolve({ duration: 12.0, hasVideo: false, hasAudio: true });
       };
     } else {
-      resolve({ duration: 3.0, hasVideo: false, hasAudio: false });
+      resolve({ duration: 4.0, hasVideo: false, hasAudio: false });
     }
   });
 }

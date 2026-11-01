@@ -281,6 +281,14 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
     }
   };
 
+  const handleToggleTrack = (trackIndex: number, prop: "locked" | "muted" | "hidden") => {
+    if (!timeline || !onUpdateTimeline) return;
+    const updated = tracks.map((t) =>
+      t.index === trackIndex ? { ...t, [prop]: !t[prop] } : t
+    );
+    onUpdateTimeline({ ...timeline, tracks: updated });
+  };
+
   // Split selected clip or clip under playhead
   const handleSplitAtPlayhead = () => {
     let targetClip: TimelineClip | undefined;
@@ -302,6 +310,10 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
     }
 
     if (!targetClip) return;
+
+    // Check if track is locked
+    const isLocked = tracks.find((t) => t.index === targetClip!.trackIndex)?.locked;
+    if (isLocked) return;
 
     const splitOffset = currentTime - targetClip.start;
     if (splitOffset <= 0.1 || targetClip.duration - splitOffset <= 0.1) return;
@@ -335,6 +347,13 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
   // Delete selected clip
   const handleDeleteSelectedClip = () => {
     if (!effectiveSelectedId) return;
+    const clip = activeClips.find((c) => c.id === effectiveSelectedId);
+    if (!clip) return;
+
+    // Check if track is locked
+    const isLocked = tracks.find((t) => t.index === clip.trackIndex)?.locked;
+    if (isLocked) return;
+
     const updated = activeClips.filter((c) => c.id !== effectiveSelectedId);
     if (onUpdateTimeline && timeline) {
       onUpdateTimeline({ ...timeline, clips: updated });
@@ -579,9 +598,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
                   {/* Track Controls: Lock, Mute/Solo, Hide */}
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() =>
-                        setTrackLocks((prev) => ({ ...prev, [track.index]: !isLocked }))
-                      }
+                      onClick={() => handleToggleTrack(track.index, "locked")}
                       className={`p-1 rounded text-[10px] ${
                         isLocked
                           ? "bg-rose-950/80 text-rose-300 border border-rose-500/40"
@@ -593,9 +610,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
                     </button>
                     {track.kind === "audio" ? (
                       <button
-                        onClick={() =>
-                          setTrackMutes((prev) => ({ ...prev, [track.index]: !isMuted }))
-                        }
+                        onClick={() => handleToggleTrack(track.index, "muted")}
                         className={`p-1 rounded text-[10px] ${
                           isMuted
                             ? "bg-amber-950/80 text-amber-300 border border-amber-500/40"
@@ -607,9 +622,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
                       </button>
                     ) : (
                       <button
-                        onClick={() =>
-                          setTrackHides((prev) => ({ ...prev, [track.index]: !isHidden }))
-                        }
+                        onClick={() => handleToggleTrack(track.index, "hidden")}
                         className={`p-1 rounded text-[10px] ${
                           isHidden
                             ? "bg-blue-950/80 text-blue-300 border border-blue-500/40"
